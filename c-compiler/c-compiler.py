@@ -820,6 +820,509 @@ class Parser:
             self.error(f"Unexpected token: {self.current_token.type.name}")
 
 # ============================================================================
+# SYMBOL TABLE AND TYPE SYSTEM
+# ============================================================================
+
+class CType:
+    """Represents a C type with size and properties."""
+    def __init__(self, name: str, size: int, is_signed: bool = True):
+        self.name = name
+        self.size = size  # Size in bytes
+        self.is_signed = is_signed
+    
+    def __str__(self):
+        return self.name
+    
+    def __eq__(self, other):
+        if isinstance(other, CType):
+            return self.name == other.name
+        return False
+    
+    def is_compatible_with(self, other: 'CType') -> bool:
+        """Check if this type is compatible with another for operations."""
+        # Same type
+        if self == other:
+            return True
+        
+        # Numeric types can be promoted
+        numeric_types = {'int', 'float', 'double', 'char'}
+        if self.name in numeric_types and other.name in numeric_types:
+            return True
+        
+        return False
+    
+    def can_assign_from(self, other: 'CType') -> bool:
+        """Check if we can assign from other type to this type."""
+        return self.is_compatible_with(other)
+
+# Built-in C types
+BUILTIN_TYPES = {
+    'void': CType('void', 0, False),
+    'char': CType('char', 1, True),
+    'int': CType('int', 4, True),
+    'float': CType('float', 4, True),
+    'double': CType('double', 8, True),
+}
+
+@dataclass
+class Symbol:
+    """Represents a symbol in the symbol table."""
+    name: str
+    symbol_type: CType
+    kind: str  # 'variable', 'function', 'parameter'
+    scope_level: int
+    is_defined: bool = False
+    line: int = 0
+    column: int = 0
+
+class FunctionSymbol(Symbol):
+    """Represents a function symbol with parameters and return type."""
+    
+    def __init__(self, name: str, return_type: CType, parameters: List[CType], 
+                 scope_level: int, is_defined: bool = False, line: int = 0, column: int = 0):
+        super().__init__(name, return_type, 'function', scope_level, is_defined, line, column)
+        self.return_type = return_type
+        self.parameters = parameters
+
+class SymbolTable:
+    """Symbol table with scope management."""
+    
+    def __init__(self):
+        self.scopes = [{}]  # Stack of scopes (list of dictionaries)
+        self.current_scope_level = 0
+        
+    def enter_scope(self):
+        """Enter a new scope."""
+        self.current_scope_level += 1
+        self.scopes.append({})
+    
+    def exit_scope(self):
+        """Exit current scope."""
+        if self.current_scope_level > 0:
+            self.scopes.pop()
+            self.current_scope_level -= 1
+    
+    def declare_symbol(self, symbol: Symbol) -> bool:
+        """Declare a symbol in current scope. Returns True if successful."""
+        current_scope = self.scopes[self.current_scope_level]
+        
+        if symbol.name in current_scope:
+            return False  # Already declared in this scope
+        
+        symbol.scope_level = self.current_scope_level
+        current_scope[symbol.name] = symbol
+        return True
+    
+    def lookup_symbol(self, name: str) -> Optional[Symbol]:
+        """Look up symbol in all scopes (from current to global)."""
+        for scope_level in range(self.current_scope_level, -1, -1):
+            scope = self.scopes[scope_level]
+            if name in scope:
+                return scope[name]
+        return None
+    
+    def lookup_in_current_scope(self, name: str) -> Optional[Symbol]:
+        """Look up symbol only in current scope."""
+        current_scope = self.scopes[self.current_scope_level]
+        return current_scope.get(name)
+
+class SemanticError(Exception):
+    """Exception raised during semantic analysis."""
+    def __init__(self, message: str, line: int = 0, column: int = 0):
+        self.message = message
+        self.line = line
+        self.column = column
+        super().__init__(f"Semantic Error: {message} at line {line}, column {column}")
+
+# ============================================================================
+# SEMANTIC ANALYZER
+# ============================================================================
+
+class SemanticAnalyzer:
+    """
+    Semantic Analyzer for C language.
+    
+    Performs:
+    1. Symbol table management (scoping, declarations)
+    2. Type checking (expressions, assignments, function calls)
+    3. Semantic validation (undefined variables, type mismatches)
+    4. Function signature validation
+    5. Return statement checking
+    """
+    
+    def __init__(self):
+        self.symbol_table = SymbolTable()
+        self.current_function = None  # Track current function for return checking
+        self.errors = []
+        
+        # Add built-in functions
+        self._add_builtin_functions()
+    
+    def _add_builtin_functions(self):
+        """Add built-in C functions to symbol table."""
+        # printf function
+        printf_symbol = FunctionSymbol(
+            'printf', 
+            BUILTIN_TYPES['int'], 
+            [BUILTIN_TYPES['char']],  # Format string (simplified)
+            0, 
+            True
+        )
+        self.symbol_table.declare_symbol(printf_symbol)
+    
+    def error(self, message: str, line: int = 0, column: int = 0):
+        """Record semantic error."""
+        error = SemanticError(message, line, column)
+        self.errors.append(error)
+        print(f"Semantic Error: {message} at line {line}, column {column}")
+    
+    def analyze(self, ast: Program) -> bool:
+        """Analyze the entire program. Returns True if no errors."""
+        try:
+            self.visit_program(ast)
+            return len(self.errors) == 0
+        except Exception as e:
+            self.error(f"Fatal semantic analysis error: {e}")
+            return False
+    
+    def visit_program(self, node: Program):
+        """Visit program root node."""
+        print("🔍 Analyzing program structure...")
+        
+        # First pass: Declare all functions and global variables
+        for declaration in node.declarations:
+            if isinstance(declaration, FunctionDeclaration):
+                self._declare_function(declaration)
+            elif isinstance(declaration, VariableDeclaration):
+                self._declare_global_variable(declaration)
+        
+        # Second pass: Analyze function bodies
+        for declaration in node.declarations:
+            if isinstance(declaration, FunctionDeclaration) and declaration.body:
+                self.visit_function_declaration(declaration)
+        
+        print(f"   Found {len([d for d in node.declarations if isinstance(d, FunctionDeclaration)])} functions")
+        print(f"   Found {len([d for d in node.declarations if isinstance(d, VariableDeclaration)])} global variables")
+    
+    def _declare_function(self, node: FunctionDeclaration):
+        """Declare function in symbol table."""
+        # Get return type
+        return_type = BUILTIN_TYPES.get(node.return_type)
+        if not return_type:
+            self.error(f"Unknown return type: {node.return_type}")
+            return
+        
+        # Get parameter types
+        param_types = []
+        for param in node.parameters:
+            param_type = BUILTIN_TYPES.get(param.type)
+            if not param_type:
+                self.error(f"Unknown parameter type: {param.type}")
+                continue
+            param_types.append(param_type)
+        
+        # Create function symbol
+        func_symbol = FunctionSymbol(
+            node.name,
+            return_type,
+            param_types,
+            0,  # Global scope
+            node.body is not None  # Defined if has body
+        )
+        
+        if not self.symbol_table.declare_symbol(func_symbol):
+            self.error(f"Function '{node.name}' already declared")
+    
+    def _declare_global_variable(self, node: VariableDeclaration):
+        """Declare global variable in symbol table."""
+        var_type = BUILTIN_TYPES.get(node.type)
+        if not var_type:
+            self.error(f"Unknown variable type: {node.type}")
+            return
+        
+        var_symbol = Symbol(
+            node.name,
+            var_type,
+            'variable',
+            0,  # Global scope
+            node.initializer is not None
+        )
+        
+        if not self.symbol_table.declare_symbol(var_symbol):
+            self.error(f"Global variable '{node.name}' already declared")
+        
+        # Check initializer type if present
+        if node.initializer:
+            init_type = self.visit_expression(node.initializer)
+            if init_type and not var_type.can_assign_from(init_type):
+                self.error(f"Cannot assign {init_type} to {var_type}")
+    
+    def visit_function_declaration(self, node: FunctionDeclaration):
+        """Visit function declaration with body."""
+        print(f"   Analyzing function: {node.name}")
+        
+        # Set current function for return checking
+        func_symbol = self.symbol_table.lookup_symbol(node.name)
+        self.current_function = func_symbol
+        
+        # Enter function scope
+        self.symbol_table.enter_scope()
+        
+        # Declare parameters in function scope
+        for param in node.parameters:
+            param_type = BUILTIN_TYPES.get(param.type)
+            if param_type:
+                param_symbol = Symbol(param.name, param_type, 'parameter', 
+                                    self.symbol_table.current_scope_level, True)
+                if not self.symbol_table.declare_symbol(param_symbol):
+                    self.error(f"Parameter '{param.name}' already declared")
+        
+        # Analyze function body
+        if node.body:
+            self.visit_compound_statement(node.body)
+        
+        # Exit function scope
+        self.symbol_table.exit_scope()
+        self.current_function = None
+    
+    def visit_compound_statement(self, node: CompoundStatement):
+        """Visit compound statement (block)."""
+        self.symbol_table.enter_scope()
+        
+        for statement in node.statements:
+            self.visit_statement(statement)
+        
+        self.symbol_table.exit_scope()
+    
+    def visit_statement(self, node: ASTNode):
+        """Visit any statement."""
+        if isinstance(node, VariableDeclaration):
+            self.visit_variable_declaration(node)
+        elif isinstance(node, ExpressionStatement):
+            if node.expression:
+                self.visit_expression(node.expression)
+        elif isinstance(node, ReturnStatement):
+            self.visit_return_statement(node)
+        elif isinstance(node, IfStatement):
+            self.visit_if_statement(node)
+        elif isinstance(node, WhileStatement):
+            self.visit_while_statement(node)
+        elif isinstance(node, ForStatement):
+            self.visit_for_statement(node)
+        elif isinstance(node, CompoundStatement):
+            self.visit_compound_statement(node)
+    
+    def visit_variable_declaration(self, node: VariableDeclaration):
+        """Visit variable declaration."""
+        var_type = BUILTIN_TYPES.get(node.type)
+        if not var_type:
+            self.error(f"Unknown variable type: {node.type}")
+            return
+        
+        var_symbol = Symbol(
+            node.name,
+            var_type,
+            'variable',
+            self.symbol_table.current_scope_level,
+            node.initializer is not None
+        )
+        
+        if not self.symbol_table.declare_symbol(var_symbol):
+            self.error(f"Variable '{node.name}' already declared in this scope")
+        
+        # Check initializer type
+        if node.initializer:
+            init_type = self.visit_expression(node.initializer)
+            if init_type and not var_type.can_assign_from(init_type):
+                self.error(f"Cannot assign {init_type} to {var_type}")
+    
+    def visit_return_statement(self, node: ReturnStatement):
+        """Visit return statement."""
+        if not self.current_function:
+            self.error("Return statement outside function")
+            return
+        
+        expected_type = self.current_function.return_type
+        
+        if node.expression:
+            actual_type = self.visit_expression(node.expression)
+            if actual_type and not expected_type.can_assign_from(actual_type):
+                self.error(f"Cannot return {actual_type} from function returning {expected_type}")
+        else:
+            if expected_type.name != 'void':
+                self.error(f"Function returning {expected_type} must return a value")
+    
+    def visit_if_statement(self, node: IfStatement):
+        """Visit if statement."""
+        # Check condition type
+        condition_type = self.visit_expression(node.condition)
+        # In C, any non-zero value is true, so we're lenient here
+        
+        # Visit then statement
+        self.visit_statement(node.then_statement)
+        
+        # Visit else statement if present
+        if node.else_statement:
+            self.visit_statement(node.else_statement)
+    
+    def visit_while_statement(self, node: WhileStatement):
+        """Visit while statement."""
+        # Check condition type
+        condition_type = self.visit_expression(node.condition)
+        
+        # Visit body
+        self.visit_statement(node.body)
+    
+    def visit_for_statement(self, node: ForStatement):
+        """Visit for statement."""
+        # Visit initialization
+        if node.init:
+            self.visit_expression(node.init)
+        
+        # Visit condition
+        if node.condition:
+            self.visit_expression(node.condition)
+        
+        # Visit update
+        if node.update:
+            self.visit_expression(node.update)
+        
+        # Visit body
+        self.visit_statement(node.body)
+    
+    def visit_expression(self, node: ASTNode) -> Optional[CType]:
+        """Visit expression and return its type."""
+        if isinstance(node, IntegerLiteral):
+            return BUILTIN_TYPES['int']
+        
+        elif isinstance(node, FloatLiteral):
+            return BUILTIN_TYPES['float']
+        
+        elif isinstance(node, StringLiteral):
+            return BUILTIN_TYPES['char']  # char* in reality
+        
+        elif isinstance(node, CharLiteral):
+            return BUILTIN_TYPES['char']
+        
+        elif isinstance(node, Identifier):
+            symbol = self.symbol_table.lookup_symbol(node.name)
+            if not symbol:
+                self.error(f"Undefined variable: {node.name}")
+                return None
+            return symbol.symbol_type
+        
+        elif isinstance(node, BinaryExpression):
+            return self.visit_binary_expression(node)
+        
+        elif isinstance(node, UnaryExpression):
+            return self.visit_unary_expression(node)
+        
+        elif isinstance(node, AssignmentExpression):
+            return self.visit_assignment_expression(node)
+        
+        elif isinstance(node, CallExpression):
+            return self.visit_call_expression(node)
+        
+        return None
+    
+    def visit_binary_expression(self, node: BinaryExpression) -> Optional[CType]:
+        """Visit binary expression and return result type."""
+        left_type = self.visit_expression(node.left)
+        right_type = self.visit_expression(node.right)
+        
+        if not left_type or not right_type:
+            return None
+        
+        # Arithmetic operators
+        if node.operator in ['+', '-', '*', '/', '%']:
+            if left_type.is_compatible_with(right_type):
+                # Type promotion: if either is float, result is float
+                if left_type.name == 'float' or right_type.name == 'float':
+                    return BUILTIN_TYPES['float']
+                return BUILTIN_TYPES['int']
+            else:
+                self.error(f"Cannot perform {node.operator} on {left_type} and {right_type}")
+                return None
+        
+        # Comparison operators
+        elif node.operator in ['<', '>', '<=', '>=', '==', '!=']:
+            if left_type.is_compatible_with(right_type):
+                return BUILTIN_TYPES['int']  # Boolean result as int
+            else:
+                self.error(f"Cannot compare {left_type} and {right_type}")
+                return None
+        
+        # Logical operators
+        elif node.operator in ['&&', '||']:
+            return BUILTIN_TYPES['int']  # Boolean result as int
+        
+        return None
+    
+    def visit_unary_expression(self, node: UnaryExpression) -> Optional[CType]:
+        """Visit unary expression and return result type."""
+        operand_type = self.visit_expression(node.operand)
+        
+        if not operand_type:
+            return None
+        
+        if node.operator in ['-', '!', '++', '--']:
+            return operand_type
+        
+        return None
+    
+    def visit_assignment_expression(self, node: AssignmentExpression) -> Optional[CType]:
+        """Visit assignment expression and return result type."""
+        left_type = self.visit_expression(node.left)
+        right_type = self.visit_expression(node.right)
+        
+        if not left_type or not right_type:
+            return None
+        
+        # Check if assignment is valid
+        if node.operator == '=':
+            if not left_type.can_assign_from(right_type):
+                self.error(f"Cannot assign {right_type} to {left_type}")
+                return None
+        else:
+            # Compound assignment (+=, -=, etc.)
+            if not left_type.is_compatible_with(right_type):
+                self.error(f"Cannot perform {node.operator} with {left_type} and {right_type}")
+                return None
+        
+        return left_type
+    
+    def visit_call_expression(self, node: CallExpression) -> Optional[CType]:
+        """Visit function call expression and return result type."""
+        # Get function name
+        if not isinstance(node.function, Identifier):
+            self.error("Invalid function call")
+            return None
+        
+        func_name = node.function.name
+        func_symbol = self.symbol_table.lookup_symbol(func_name)
+        
+        if not func_symbol:
+            self.error(f"Undefined function: {func_name}")
+            return None
+        
+        if not isinstance(func_symbol, FunctionSymbol):
+            self.error(f"'{func_name}' is not a function")
+            return None
+        
+        # Check argument count
+        if len(node.arguments) != len(func_symbol.parameters):
+            self.error(f"Function '{func_name}' expects {len(func_symbol.parameters)} arguments, got {len(node.arguments)}")
+            return None
+        
+        # Check argument types
+        for i, (arg, expected_type) in enumerate(zip(node.arguments, func_symbol.parameters)):
+            actual_type = self.visit_expression(arg)
+            if actual_type and not expected_type.can_assign_from(actual_type):
+                self.error(f"Argument {i+1} to '{func_name}': cannot convert {actual_type} to {expected_type}")
+        
+        return func_symbol.return_type
+
+# ============================================================================
 # LEXICAL ANALYZER (TOKENIZER)
 # ============================================================================
 
@@ -1125,8 +1628,18 @@ class CCompiler:
             for i, decl in enumerate(ast.declarations[:3]):  # Show first 3 declarations
                 print(f"     {i+1}. {type(decl).__name__}: {self._format_ast_node(decl)}")
             
-            # TODO: Phase 3: Semantic Analysis
-            print("🔍 Phase 3: Semantic Analysis - TODO")
+            # Phase 3: Semantic Analysis
+            print("🔍 Phase 3: Semantic Analysis...")
+            self.semantic_analyzer = SemanticAnalyzer()
+            semantic_success = self.semantic_analyzer.analyze(ast)
+            
+            if not semantic_success:
+                print(f"   ❌ Found {len(self.semantic_analyzer.errors)} semantic errors:")
+                for error in self.semantic_analyzer.errors:
+                    print(f"     • {error.message}")
+                return False
+            
+            print("   ✅ Semantic analysis completed successfully!")
             
             # TODO: Phase 4: Code Generation  
             print("⚙️ Phase 4: Code Generation - TODO")
