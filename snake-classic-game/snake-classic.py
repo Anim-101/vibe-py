@@ -2,12 +2,22 @@ import tkinter as tk
 import random
 import time
 import re
+try:
+    import pygame
+    SOUND_AVAILABLE = True
+except ImportError:
+    SOUND_AVAILABLE = False
+    print("Pygame not available. Running without sound.")
 
 # Game configuration
 GAME_WIDTH = 800
 GAME_HEIGHT = 600
 SPEED = 100  # Milliseconds between moves
 SPACE_SIZE = 20
+
+# Sound configuration
+SOUND_ENABLED = True
+SOUND_VOLUME = 0.5
 # Realistic snake colors with gradients
 SNAKE_HEAD_COLORS = ["#00FF00", "#32FF32", "#00CC00"]  # Gradient green head
 SNAKE_BODY_COLORS = ["#32CD32", "#50E050", "#28A428"]  # Gradient body segments
@@ -41,6 +51,253 @@ STAGE_BACKGROUNDS = {
     4: "#112200",  # Stage 4: Dark Green (Forest)
     5: "#221100"   # Stage 5: Dark Brown (Desert)
 }
+
+class SoundSystem:
+    """Simple sound system using basic pygame mixer"""
+    
+    def __init__(self):
+        self.enabled = SOUND_ENABLED and SOUND_AVAILABLE
+        self.volume = SOUND_VOLUME
+        self.channels = {}
+        
+        print(f"Sound System - Pygame Available: {SOUND_AVAILABLE}")
+        print(f"Sound System - Enabled: {SOUND_ENABLED}")
+        
+        if self.enabled:
+            try:
+                pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=1024)
+                print("Pygame mixer initialized successfully")
+                self.setup_simple_sounds()
+                print("Simple sound system ready")
+            except Exception as e:
+                print(f"Could not initialize sound system: {e}")
+                self.enabled = False
+        else:
+            print("Sound system disabled")
+    
+    def setup_simple_sounds(self):
+        """Setup simple sound effects using pygame mixer"""
+        if not self.enabled:
+            return
+        
+        try:
+            # Set up mixer for sound generation
+            pygame.mixer.set_num_channels(8)
+            
+            # Pre-generate sound data for different effects
+            self.sound_data = {}
+            self.generate_basic_sounds()
+            
+            print("Sound system configured with pre-generated sounds")
+            
+        except Exception as e:
+            print(f"Error setting up sound system: {e}")
+            self.enabled = False
+    
+    def generate_basic_sounds(self):
+        """Generate basic sound effects and background music using raw audio data"""
+        try:
+            import struct
+            import math
+            
+            sample_rate = 22050
+            
+            # Generate sound effects
+            sounds = {
+                'eat': (440, 0.1),      # Short beep
+                'bonus': (660, 0.2),    # Higher, longer beep
+                'stage_up': (880, 0.3), # Even higher
+                'game_over': (220, 0.5), # Low, longer
+                'victory': (523, 0.4)   # Victory tone
+            }
+            
+            # Generate background music for each stage
+            self.generate_background_music(sample_rate)
+            
+            for sound_name, (frequency, duration) in sounds.items():
+                frames = int(sample_rate * duration)
+                raw_data = b''
+                
+                for i in range(frames):
+                    time_val = float(i) / sample_rate
+                    # Generate sine wave
+                    wave_val = math.sin(frequency * 2 * math.pi * time_val)
+                    
+                    # Apply envelope to prevent clicks
+                    envelope = 1.0
+                    fade_frames = int(frames * 0.1)
+                    if i < fade_frames:
+                        envelope = i / fade_frames
+                    elif i > frames - fade_frames:
+                        envelope = (frames - i) / fade_frames
+                    
+                    # Scale and convert to 16-bit
+                    sample = int(wave_val * envelope * 16384 * self.volume)
+                    # Pack as stereo 16-bit samples
+                    raw_data += struct.pack('<hh', sample, sample)
+                
+                # Create pygame sound from raw data
+                try:
+                    sound = pygame.mixer.Sound(buffer=raw_data)
+                    self.sound_data[sound_name] = sound
+                    print(f"Generated {sound_name} sound ({frequency}Hz, {duration}s)")
+                except Exception as e:
+                    print(f"Error creating {sound_name} sound: {e}")
+                    self.sound_data[sound_name] = None
+                    
+        except Exception as e:
+            print(f"Error generating sounds: {e}")
+            # Create fallback empty sounds
+            for sound_name in ['eat', 'bonus', 'stage_up', 'game_over', 'victory']:
+                self.sound_data[sound_name] = None
+    
+    def generate_background_music(self, sample_rate):
+        """Generate looping background music for each stage"""
+        try:
+            import struct
+            import math
+            
+            # Background music themes for each stage
+            stage_themes = {
+                1: {'name': 'Space Ambient', 'base_freq': 220, 'harmonics': [1.0, 1.5, 2.0], 'tempo': 0.8},
+                2: {'name': 'Ocean Waves', 'base_freq': 165, 'harmonics': [1.0, 1.2, 1.8], 'tempo': 0.6},
+                3: {'name': 'Crystal Cave', 'base_freq': 330, 'harmonics': [1.0, 1.33, 2.5], 'tempo': 0.7},
+                4: {'name': 'Forest Nature', 'base_freq': 196, 'harmonics': [1.0, 1.25, 1.67], 'tempo': 0.9},
+                5: {'name': 'Desert Wind', 'base_freq': 147, 'harmonics': [1.0, 1.4, 2.2], 'tempo': 0.5}
+            }
+            
+            # Generate 8-second loops for each stage
+            duration = 8.0
+            frames = int(sample_rate * duration)
+            
+            for stage, theme in stage_themes.items():
+                raw_data = b''
+                base_freq = theme['base_freq']
+                harmonics = theme['harmonics']
+                tempo = theme['tempo']
+                
+                for i in range(frames):
+                    time_val = float(i) / sample_rate
+                    
+                    # Create ambient drone with harmonics
+                    wave_val = 0
+                    for j, harmonic in enumerate(harmonics):
+                        freq = base_freq * harmonic
+                        amplitude = 0.3 / (j + 1)  # Decreasing amplitude for harmonics
+                        
+                        # Add some variation based on stage theme
+                        if stage == 1:  # Space - slow oscillation
+                            freq += 5 * math.sin(time_val * 0.5)
+                        elif stage == 2:  # Ocean - wave-like modulation
+                            freq += 3 * math.sin(time_val * 0.3) + 2 * math.sin(time_val * 0.7)
+                        elif stage == 3:  # Cave - crystal-like shimmer
+                            freq += 8 * math.sin(time_val * 1.2) * math.sin(time_val * 0.1)
+                        elif stage == 4:  # Forest - natural rhythm
+                            freq += 4 * math.sin(time_val * 0.4) + 2 * math.sin(time_val * 0.8)
+                        elif stage == 5:  # Desert - wind-like variation
+                            freq += 6 * math.sin(time_val * 0.2) * (1 + 0.5 * math.sin(time_val * 2.0))
+                        
+                        wave_val += amplitude * math.sin(freq * 2 * math.pi * time_val)
+                    
+                    # Add tempo-based pulse
+                    pulse = 0.1 * math.sin(time_val * tempo * 2 * math.pi) + 0.9
+                    wave_val *= pulse
+                    
+                    # Gentle overall envelope
+                    envelope = 0.7 + 0.3 * math.sin(time_val * 0.125 * 2 * math.pi)
+                    wave_val *= envelope
+                    
+                    # Scale and convert to 16-bit
+                    sample = int(wave_val * 8192 * self.volume * 0.3)  # Quieter background
+                    raw_data += struct.pack('<hh', sample, sample)
+                
+                # Create pygame sound from raw data
+                try:
+                    bg_sound = pygame.mixer.Sound(buffer=raw_data)
+                    self.sound_data[f'bg_stage_{stage}'] = bg_sound
+                    print(f"Generated background music: {theme['name']} (Stage {stage})")
+                except Exception as e:
+                    print(f"Error creating background music for stage {stage}: {e}")
+                    self.sound_data[f'bg_stage_{stage}'] = None
+                    
+        except Exception as e:
+            print(f"Error generating background music: {e}")
+    
+    def play(self, sound_name):
+        """Play a sound effect"""
+        if not self.enabled:
+            return
+        
+        try:
+            if hasattr(self, 'sound_data') and sound_name in self.sound_data:
+                sound = self.sound_data[sound_name]
+                if sound:
+                    sound.set_volume(self.volume)
+                    sound.play()
+                    print(f"Playing {sound_name} sound")
+                else:
+                    print(f"Sound {sound_name} not available")
+            else:
+                print(f"Sound {sound_name} not found")
+                
+        except Exception as e:
+            print(f"Error playing sound {sound_name}: {e}")
+    
+    def toggle_sound(self):
+        """Toggle sound on/off"""
+        global SOUND_ENABLED
+        SOUND_ENABLED = not SOUND_ENABLED
+        self.enabled = SOUND_ENABLED and SOUND_AVAILABLE
+        return self.enabled
+    
+    def set_volume(self, volume):
+        """Set volume (0.0 to 1.0)"""
+        self.volume = max(0.0, min(1.0, volume))
+        global SOUND_VOLUME
+        SOUND_VOLUME = self.volume
+        
+        # Update volume for all generated sounds
+        if self.enabled and hasattr(self, 'sound_data'):
+            for sound_name, sound in self.sound_data.items():
+                if sound:
+                    if sound_name.startswith('bg_stage_'):
+                        sound.set_volume(self.volume * 0.3)  # Background music quieter
+                    else:
+                        sound.set_volume(self.volume)
+    
+    def play_background_music(self, stage):
+        """Start playing background music for a stage"""
+        if not self.enabled:
+            return
+        
+        try:
+            # Stop any currently playing background music
+            self.stop_background_music()
+            
+            # Start new background music
+            bg_name = f'bg_stage_{stage}'
+            if hasattr(self, 'sound_data') and bg_name in self.sound_data:
+                bg_sound = self.sound_data[bg_name]
+                if bg_sound:
+                    bg_sound.set_volume(self.volume * 0.3)  # Background music quieter
+                    bg_sound.play(loops=-1)  # Loop indefinitely
+                    self.current_bg_sound = bg_sound
+                    print(f"Started background music for stage {stage}")
+                else:
+                    print(f"Background music for stage {stage} not available")
+            
+        except Exception as e:
+            print(f"Error playing background music for stage {stage}: {e}")
+    
+    def stop_background_music(self):
+        """Stop currently playing background music"""
+        try:
+            if hasattr(self, 'current_bg_sound') and self.current_bg_sound:
+                self.current_bg_sound.stop()
+                self.current_bg_sound = None
+                print("Stopped background music")
+        except Exception as e:
+            print(f"Error stopping background music: {e}")
 STAGE_NAMES = {
     1: "Classic Arena",
     2: "Ocean Depths", 
@@ -199,6 +456,10 @@ class SnakeGame:
         self.root = root
         self.root.title("Snake Game - Vibe Python Edition")
         
+        # Initialize sound system
+        self.sound_system = SoundSystem()
+        self.current_stage = 1
+        
         # Configure window size and appearance
         self.root.configure(bg='#000000')
         self.root.resizable(False, False)  # Fixed size window
@@ -266,6 +527,9 @@ class SnakeGame:
         
         # Start real-time timestamp updates
         self.update_timestamp_display()
+        
+        # Start background music for stage 1
+        self.sound_system.play_background_music(1)
         
         self.next_move()
 
@@ -424,6 +688,9 @@ class SnakeGame:
 
         # Check collision with regular food
         if x == self.food.x and y == self.food.y:
+            # Play eat sound
+            self.sound_system.play('eat')
+            
             points_earned = self.calculate_food_points()
             self.score += points_earned
             self.total_foods_eaten += 1

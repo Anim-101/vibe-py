@@ -177,3 +177,76 @@ Maintained Enhancements:
 - Simple but effective background elements
 - Smooth performance without animation interference
 - Consistent food generation and game mechanics
+
+# Scenario 12
+
+Comprehensive sound system with programmatic audio effects
+
+Sound Features:
+- Programmatic sound generation using pygame and numpy
+- Real-time audio synthesis for all game events
+- Fallback system for environments without numpy
+- Volume control and sound toggle functionality
+
+Sound Effects:
+- Eat Sound: Short beep (440Hz sine wave) when eating regular food
+- Bonus Sound: Multi-tone chord (523, 659, 784Hz) for bonus food
+- Stage Up: Ascending melody (330, 440, 523, 659Hz) for stage progression
+- Game Over: Descending sad notes (440, 330, 262, 196Hz) for game end
+- Victory: Triumphant fanfare (C-E-G-C arpeggio) for completing all stages
+
+Sound Controls:
+- M key: Toggle sound on/off with visual indicator (🔊/🔇)
+- + key: Increase volume by 10%
+- - key: Decrease volume by 10%
+- Real-time volume feedback in console
+- Sound status displayed in game UI
+
+Technical Implementation:
+- SoundSystem class handles all audio functionality
+- Graceful error handling for missing dependencies
+- Automatic fallback if pygame/numpy unavailable
+- Non-blocking audio playback
+- Memory-efficient sound generation
+- Cross-platform compatibility
+
+Audio Quality:
+- 22050Hz sample rate for good quality
+- 16-bit audio depth
+- Stereo output
+- Anti-click envelopes on all sounds
+- Volume normalization
+- Professional audio synthesis techniques
+
+## Background Music System Update
+
+Immersive Stage-Specific Ambient Music:
+
+Stage Themes:
+- Stage 1 (Space): Deep ambient drone with slow oscillations and cosmic atmosphere
+- Stage 2 (Ocean): Wave-like modulations with flowing, aquatic soundscape
+- Stage 3 (Cave): Crystal-like shimmer effects with mysterious cave ambience
+- Stage 4 (Forest): Natural rhythms with organic, earthy tones
+- Stage 5 (Desert): Wind-like variations with expansive, arid atmosphere
+
+Technical Features:
+- 8-second looping ambient tracks for each stage
+- Harmonic synthesis using base frequencies and overtones
+- Dynamic modulation effects unique to each environment
+- Automatic stage transitions with seamless music changes
+- Volume-balanced background audio (30% of main volume)
+- Real-time audio synthesis without external files
+
+Music Control:
+- Automatically starts with Stage 1 ambient music
+- Seamlessly transitions when advancing stages
+- Stops during game over and victory sequences
+- Restarts when game is reset or restarted
+- Integrated with existing volume controls
+
+Audio Architecture:
+- Programmatic generation using sine wave synthesis
+- Multiple harmonic layers for rich ambient textures
+- Tempo-based pulse effects for subtle rhythm
+- Environmental modulation specific to each stage theme
+- Memory-efficient looping system
