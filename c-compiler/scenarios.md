@@ -105,3 +105,18 @@
 - x86-64 assembly code generation with calling conventions
 - Multi-level optimization system with measurable performance gains
 - Professional command-line interface and error reporting
+
+# Scenario 7
+
+- Backward dataflow analysis to compute variable lifetimes
+- def/use sets for each instruction
+- live_in/live_out computation with iterative convergence
+- Control flow graph analysis for accurate liveness
+- Intelligent register assignment based on live intervals
+- Register spilling strategy when register pressure is high
+- Calling convention awareness (System V AMD64)
+- Register reuse optimization for non-overlapping intervals
+- Memory access reduction by keeping variables in registers
+- Smart spilling only when necessary
+- Register lifetime management with precise allocation
+- Cross-function register coordination

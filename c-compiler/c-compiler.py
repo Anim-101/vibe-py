@@ -19,7 +19,7 @@ import sys
 import os
 import re
 import enum
-from typing import List, Dict, Optional, Union, Any
+from typing import List, Dict, Optional, Union, Any, Set
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
@@ -1427,8 +1427,14 @@ class CodeGenerator:
     def __init__(self):
         self.output = []  # Generated assembly code lines
         self.register_allocator = RegisterAllocator()
+        self.advanced_allocator = AdvancedRegisterAllocator()
         self.label_counter = 0
         self.current_function = None
+        self.use_advanced_allocation = True  # Enable advanced register allocation
+    
+    def set_advanced_allocation(self, enabled: bool):
+        """Enable or disable advanced register allocation."""
+        self.use_advanced_allocation = enabled
         
     def generate_label(self, prefix: str = "L") -> str:
         """Generate unique label for jumps and branches."""
@@ -1501,8 +1507,13 @@ class CodeGenerator:
         print(f"   Generating function: {node.name}")
         self.current_function = node
         
-        # Reset register allocator for new function
-        self.register_allocator = RegisterAllocator()
+        # Perform advanced register allocation if enabled
+        if self.use_advanced_allocation:
+            self.allocation_map = self.advanced_allocator.allocate_registers(node)
+        else:
+            # Reset simple register allocator for new function
+            self.register_allocator = RegisterAllocator()
+            self.allocation_map = {}
         
         # Function label
         self.emit_directive("")
@@ -1670,8 +1681,22 @@ class CodeGenerator:
             return reg
         
         elif isinstance(node, Identifier):
-            # Load variable from stack or global
-            if node.name in self.register_allocator.local_vars:
+            # Use advanced register allocation if available
+            if self.use_advanced_allocation and node.name in self.allocation_map:
+                allocated_location = self.allocation_map[node.name]
+                if allocated_location == 'spilled':
+                    # Variable is spilled to stack
+                    offset = self.advanced_allocator.spilled_variables[node.name]
+                    reg = self.register_allocator.allocate_register()
+                    if reg:
+                        self.emit(f"movq -{offset}(%rbp), %{reg}", f"load spilled {node.name}")
+                    return reg
+                else:
+                    # Variable is in register
+                    return allocated_location
+            
+            # Fallback to original method
+            elif node.name in self.register_allocator.local_vars:
                 offset = self.register_allocator.local_vars[node.name]
                 reg = self.register_allocator.allocate_register()
                 if reg:
@@ -1739,8 +1764,18 @@ class CodeGenerator:
         if not rhs_reg:
             return None
         
-        # Store to variable
-        if var_name in self.register_allocator.local_vars:
+        # Store to variable using advanced allocation if available
+        if self.use_advanced_allocation and var_name in self.allocation_map:
+            allocated_location = self.allocation_map[var_name]
+            if allocated_location == 'spilled':
+                # Variable is spilled to stack
+                offset = self.advanced_allocator.spilled_variables[var_name]
+                self.emit(f"movq %{rhs_reg}, -{offset}(%rbp)", f"assign to spilled {var_name}")
+            else:
+                # Variable is in register - direct register-to-register move
+                if rhs_reg != allocated_location:
+                    self.emit(f"movq %{rhs_reg}, %{allocated_location}", f"assign to {var_name}")
+        elif var_name in self.register_allocator.local_vars:
             offset = self.register_allocator.local_vars[var_name]
             self.emit(f"movq %{rhs_reg}, -{offset}(%rbp)", f"assign to {var_name}")
         else:
@@ -2265,6 +2300,462 @@ class OptimizationManager:
         return optimized_assembly
 
 # ============================================================================
+# ADVANCED REGISTER ALLOCATION
+# ============================================================================
+
+class LiveInterval:
+    """Represents the live range of a variable."""
+    def __init__(self, variable: str, start: int, end: int):
+        self.variable = variable
+        self.start = start      # First use
+        self.end = end          # Last use
+        self.register = None    # Assigned register
+        self.spilled = False    # Whether variable is spilled to memory
+        self.spill_location = None  # Stack offset if spilled
+    
+    def __str__(self):
+        return f"{self.variable}[{self.start}-{self.end}] → {self.register}"
+    
+    def overlaps(self, other: 'LiveInterval') -> bool:
+        """Check if this interval overlaps with another."""
+        return not (self.end < other.start or other.end < self.start)
+
+class LiveVariableAnalysis:
+    """
+    Performs live variable analysis to determine variable lifetimes.
+    
+    Uses backward dataflow analysis to compute:
+    - def[n]: Variables defined (written) at instruction n
+    - use[n]: Variables used (read) at instruction n  
+    - live_in[n]: Variables live at entry to instruction n
+    - live_out[n]: Variables live at exit from instruction n
+    """
+    
+    def __init__(self):
+        self.instructions = []      # List of instruction objects
+        self.def_sets = {}          # def[n] - variables defined at n
+        self.use_sets = {}          # use[n] - variables used at n
+        self.live_in = {}           # live_in[n] - variables live at entry
+        self.live_out = {}          # live_out[n] - variables live at exit
+        self.successors = {}        # Control flow successors
+        self.variable_intervals = {} # Live intervals for each variable
+    
+    def analyze_function(self, function_ast: FunctionDeclaration) -> Dict[str, LiveInterval]:
+        """Analyze live variables for a function and compute intervals."""
+        print(f"   🔍 Analyzing live variables for: {function_ast.name}")
+        
+        # Step 1: Extract instructions and build CFG
+        self.extract_instructions(function_ast.body)
+        
+        # Step 2: Compute def/use sets for each instruction
+        self.compute_def_use_sets()
+        
+        # Step 3: Perform backward dataflow analysis
+        self.compute_liveness()
+        
+        # Step 4: Compute live intervals
+        self.compute_live_intervals()
+        
+        print(f"      Found {len(self.variable_intervals)} variables with live intervals")
+        for var, interval in self.variable_intervals.items():
+            print(f"      {interval}")
+        
+        return self.variable_intervals
+    
+    def extract_instructions(self, node: ASTNode, instruction_id: int = 0):
+        """Extract linear instruction sequence from AST."""
+        self.instructions = []
+        self._extract_recursive(node, 0)
+    
+    def _extract_recursive(self, node: ASTNode, inst_id: int) -> int:
+        """Recursively extract instructions from AST nodes."""
+        if isinstance(node, CompoundStatement):
+            for stmt in node.statements:
+                inst_id = self._extract_recursive(stmt, inst_id)
+        
+        elif isinstance(node, VariableDeclaration):
+            # Variable definition
+            self.instructions.append(('def', inst_id, node.name, node.initializer))
+            inst_id += 1
+        
+        elif isinstance(node, AssignmentExpression):
+            # Assignment: use RHS, then def LHS
+            if isinstance(node.left, Identifier):
+                self.instructions.append(('assign', inst_id, node.left.name, node.right))
+                inst_id += 1
+        
+        elif isinstance(node, BinaryExpression):
+            # Binary operation: use both operands
+            self.instructions.append(('binop', inst_id, node.operator, node.left, node.right))
+            inst_id += 1
+        
+        elif isinstance(node, CallExpression):
+            # Function call: use all arguments
+            if isinstance(node.function, Identifier):
+                self.instructions.append(('call', inst_id, node.function.name, node.arguments))
+                inst_id += 1
+        
+        elif isinstance(node, ReturnStatement):
+            # Return: use return value
+            self.instructions.append(('return', inst_id, node.expression))
+            inst_id += 1
+        
+        elif isinstance(node, IfStatement):
+            # Conditional: use condition, then branches
+            self.instructions.append(('cond', inst_id, node.condition))
+            cond_id = inst_id
+            inst_id += 1
+            
+            then_start = inst_id
+            inst_id = self._extract_recursive(node.then_statement, inst_id)
+            then_end = inst_id - 1
+            
+            if node.else_statement:
+                else_start = inst_id
+                inst_id = self._extract_recursive(node.else_statement, inst_id)
+                else_end = inst_id - 1
+                # Set up control flow
+                self.successors[cond_id] = [then_start, else_start]
+            else:
+                self.successors[cond_id] = [then_start, inst_id]
+        
+        elif isinstance(node, ExpressionStatement):
+            if node.expression:
+                inst_id = self._extract_recursive(node.expression, inst_id)
+        
+        return inst_id
+    
+    def compute_def_use_sets(self):
+        """Compute def and use sets for each instruction."""
+        for i, instruction in enumerate(self.instructions):
+            self.def_sets[i] = set()
+            self.use_sets[i] = set()
+            
+            inst_type = instruction[0]
+            
+            if inst_type == 'def':
+                # Variable definition: def = {var}, use = variables in initializer
+                var_name = instruction[2]
+                initializer = instruction[3]
+                self.def_sets[i].add(var_name)
+                if initializer:
+                    self.use_sets[i].update(self._get_variables_used(initializer))
+            
+            elif inst_type == 'assign':
+                # Assignment: def = {lhs}, use = variables in rhs
+                lhs_var = instruction[2]
+                rhs_expr = instruction[3]
+                self.def_sets[i].add(lhs_var)
+                self.use_sets[i].update(self._get_variables_used(rhs_expr))
+            
+            elif inst_type == 'binop':
+                # Binary operation: use = variables in both operands
+                left_expr = instruction[3]
+                right_expr = instruction[4]
+                self.use_sets[i].update(self._get_variables_used(left_expr))
+                self.use_sets[i].update(self._get_variables_used(right_expr))
+            
+            elif inst_type == 'call':
+                # Function call: use = variables in arguments
+                arguments = instruction[3]
+                for arg in arguments:
+                    self.use_sets[i].update(self._get_variables_used(arg))
+            
+            elif inst_type == 'return':
+                # Return: use = variables in return expression
+                return_expr = instruction[2]
+                if return_expr:
+                    self.use_sets[i].update(self._get_variables_used(return_expr))
+            
+            elif inst_type == 'cond':
+                # Condition: use = variables in condition
+                condition = instruction[2]
+                self.use_sets[i].update(self._get_variables_used(condition))
+    
+    def _get_variables_used(self, expr: ASTNode) -> Set[str]:
+        """Extract all variable names used in an expression."""
+        variables = set()
+        
+        if isinstance(expr, Identifier):
+            variables.add(expr.name)
+        elif isinstance(expr, BinaryExpression):
+            variables.update(self._get_variables_used(expr.left))
+            variables.update(self._get_variables_used(expr.right))
+        elif isinstance(expr, UnaryExpression):
+            variables.update(self._get_variables_used(expr.operand))
+        elif isinstance(expr, CallExpression):
+            for arg in expr.arguments:
+                variables.update(self._get_variables_used(arg))
+        elif isinstance(expr, AssignmentExpression):
+            variables.update(self._get_variables_used(expr.left))
+            variables.update(self._get_variables_used(expr.right))
+        
+        return variables
+    
+    def compute_liveness(self):
+        """Compute live_in and live_out sets using backward dataflow analysis."""
+        # Initialize all sets to empty
+        num_instructions = len(self.instructions)
+        for i in range(num_instructions):
+            self.live_in[i] = set()
+            self.live_out[i] = set()
+        
+        # Iteratively compute liveness until convergence
+        changed = True
+        iterations = 0
+        
+        while changed and iterations < 50:  # Prevent infinite loops
+            changed = False
+            iterations += 1
+            
+            # Process instructions in reverse order (backward analysis)
+            for i in range(num_instructions - 1, -1, -1):
+                old_live_in = self.live_in[i].copy()
+                old_live_out = self.live_out[i].copy()
+                
+                # live_out[i] = Union of live_in of all successors
+                if i in self.successors:
+                    for succ in self.successors[i]:
+                        if succ < num_instructions:
+                            self.live_out[i].update(self.live_in[succ])
+                elif i + 1 < num_instructions:
+                    # Default: next instruction is successor
+                    self.live_out[i].update(self.live_in[i + 1])
+                
+                # live_in[i] = use[i] ∪ (live_out[i] - def[i])
+                self.live_in[i] = self.use_sets[i].union(
+                    self.live_out[i] - self.def_sets[i]
+                )
+                
+                # Check if anything changed
+                if (old_live_in != self.live_in[i] or 
+                    old_live_out != self.live_out[i]):
+                    changed = True
+        
+        print(f"      Liveness analysis converged in {iterations} iterations")
+    
+    def compute_live_intervals(self):
+        """Compute live intervals for each variable."""
+        # Find first and last occurrence of each variable
+        first_use = {}
+        last_use = {}
+        
+        for i in range(len(self.instructions)):
+            # Variables in live_in are live at this point
+            for var in self.live_in[i]:
+                if var not in first_use:
+                    first_use[var] = i
+                last_use[var] = i
+            
+            # Variables in live_out are live after this point
+            for var in self.live_out[i]:
+                if var not in first_use:
+                    first_use[var] = i
+                last_use[var] = i
+        
+        # Create live intervals
+        self.variable_intervals = {}
+        for var in first_use:
+            start = first_use[var]
+            end = last_use.get(var, start)
+            self.variable_intervals[var] = LiveInterval(var, start, end)
+
+class AdvancedRegisterAllocator:
+    """
+    Advanced Register Allocator using Linear Scan Algorithm.
+    
+    Performs sophisticated register allocation with:
+    - Live variable analysis
+    - Register spilling when needed
+    - Efficient register reuse
+    - Calling convention awareness
+    """
+    
+    def __init__(self):
+        # Available registers (exclude special purpose ones)
+        self.general_registers = [
+            'rbx', 'r12', 'r13', 'r14', 'r15',  # Callee-saved (preferred)
+            'r10', 'r11',                        # Caller-saved scratch
+            'r8', 'r9'                          # Parameter registers (reusable)
+        ]
+        
+        # Parameter registers (System V AMD64 calling convention)
+        self.param_registers = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
+        
+        # Special registers
+        self.return_register = 'rax'
+        self.stack_pointer = 'rsp'
+        self.base_pointer = 'rbp'
+        
+        # Allocation state
+        self.active_intervals = []      # Currently active live intervals
+        self.register_assignments = {}  # Variable -> register mapping
+        self.spilled_variables = {}     # Variable -> stack offset mapping
+        self.stack_offset = 0          # Current stack offset for spills
+        
+        # Statistics
+        self.total_variables = 0
+        self.registers_used = 0
+        self.variables_spilled = 0
+    
+    def allocate_registers(self, function_ast: FunctionDeclaration) -> Dict[str, str]:
+        """
+        Perform register allocation for a function using linear scan algorithm.
+        
+        Returns mapping from variable names to register names or stack locations.
+        """
+        print(f"   🎯 Performing register allocation for: {function_ast.name}")
+        
+        # Step 1: Perform live variable analysis
+        liveness_analyzer = LiveVariableAnalysis()
+        live_intervals = liveness_analyzer.analyze_function(function_ast)
+        
+        if not live_intervals:
+            print("      No variables to allocate")
+            return {}
+        
+        # Step 2: Sort intervals by start point (linear scan requirement)
+        sorted_intervals = sorted(live_intervals.values(), key=lambda x: x.start)
+        
+        # Step 3: Allocate parameters to their conventional registers
+        self._allocate_parameters(function_ast.parameters)
+        
+        # Step 4: Linear scan register allocation
+        self._linear_scan_allocation(sorted_intervals)
+        
+        # Step 5: Generate final allocation mapping
+        allocation_map = self._generate_allocation_map()
+        
+        # Report statistics
+        self.total_variables = len(live_intervals)
+        self.registers_used = len(set(allocation_map.values()) - {'spilled'})
+        self.variables_spilled = sum(1 for v in allocation_map.values() if v == 'spilled')
+        
+        print(f"      ✅ Allocated {self.total_variables} variables:")
+        print(f"         📊 {self.registers_used} in registers, {self.variables_spilled} spilled")
+        
+        for var, location in allocation_map.items():
+            if location != 'spilled':
+                print(f"         {var} → %{location}")
+            else:
+                offset = self.spilled_variables[var]
+                print(f"         {var} → {offset}(%rbp) [spilled]")
+        
+        return allocation_map
+    
+    def _allocate_parameters(self, parameters: List):
+        """Allocate function parameters to calling convention registers."""
+        for i, param in enumerate(parameters):
+            if i < len(self.param_registers):
+                reg = self.param_registers[i]
+                self.register_assignments[param.name] = reg
+                print(f"         Parameter {param.name} → %{reg}")
+    
+    def _linear_scan_allocation(self, intervals: List[LiveInterval]):
+        """
+        Linear scan register allocation algorithm.
+        
+        For each interval in sorted order:
+        1. Expire old intervals that no longer overlap
+        2. If free register available, assign it
+        3. Otherwise, spill least recently used interval
+        """
+        for interval in intervals:
+            # Skip if already allocated (e.g., function parameters)
+            if interval.variable in self.register_assignments:
+                continue
+            
+            # Step 1: Expire old intervals
+            self._expire_old_intervals(interval)
+            
+            # Step 2: Try to allocate a register
+            if len(self.active_intervals) < len(self.general_registers):
+                # Free register available
+                reg = self._get_free_register()
+                interval.register = reg
+                self.register_assignments[interval.variable] = reg
+                self.active_intervals.append(interval)
+                self.active_intervals.sort(key=lambda x: x.end)  # Keep sorted by end time
+            else:
+                # No free register - need to spill
+                self._spill_at_interval(interval)
+    
+    def _expire_old_intervals(self, current_interval: LiveInterval):
+        """Remove intervals that no longer overlap with current interval."""
+        expired = []
+        for active in self.active_intervals:
+            if active.end < current_interval.start:
+                # This interval has expired - free its register
+                expired.append(active)
+        
+        for exp in expired:
+            self.active_intervals.remove(exp)
+    
+    def _get_free_register(self) -> str:
+        """Find a free general-purpose register."""
+        used_registers = {interval.register for interval in self.active_intervals 
+                         if interval.register}
+        
+        for reg in self.general_registers:
+            if reg not in used_registers and reg not in self.register_assignments.values():
+                return reg
+        
+        # Fallback - should not happen if logic is correct
+        return self.general_registers[0]
+    
+    def _spill_at_interval(self, interval: LiveInterval):
+        """
+        Spill strategy: spill the interval that ends last.
+        
+        If current interval ends before the last active interval,
+        spill the last active interval and allocate its register to current.
+        Otherwise, spill the current interval.
+        """
+        # Find interval that ends last
+        last_interval = max(self.active_intervals, key=lambda x: x.end)
+        
+        if interval.end < last_interval.end:
+            # Spill the last interval and use its register
+            interval.register = last_interval.register
+            self.register_assignments[interval.variable] = last_interval.register
+            
+            # Spill the last interval
+            self._spill_variable(last_interval)
+            
+            # Remove last interval and add current
+            self.active_intervals.remove(last_interval)
+            self.active_intervals.append(interval)
+            self.active_intervals.sort(key=lambda x: x.end)
+        else:
+            # Spill current interval
+            self._spill_variable(interval)
+    
+    def _spill_variable(self, interval: LiveInterval):
+        """Spill a variable to memory (stack)."""
+        self.stack_offset += 8  # 8 bytes for 64-bit values
+        interval.spilled = True
+        interval.spill_location = self.stack_offset
+        self.spilled_variables[interval.variable] = self.stack_offset
+        
+        # Remove from register assignment if present
+        if interval.variable in self.register_assignments:
+            del self.register_assignments[interval.variable]
+    
+    def _generate_allocation_map(self) -> Dict[str, str]:
+        """Generate final allocation mapping."""
+        allocation_map = {}
+        
+        # Add register assignments
+        for var, reg in self.register_assignments.items():
+            allocation_map[var] = reg
+        
+        # Add spilled variables
+        for var in self.spilled_variables:
+            allocation_map[var] = 'spilled'
+        
+        return allocation_map
+
+# ============================================================================
 # LEXICAL ANALYZER (TOKENIZER)
 # ============================================================================
 
@@ -2516,7 +3007,7 @@ class CCompiler:
         self.lexer = None
         self.parser = None
         self.semantic_analyzer = None
-        self.code_generator = None
+        self.code_generator = CodeGenerator()
         self.optimizer = OptimizationManager()
         self.optimization_level = 1  # Default optimization level
     
@@ -2600,7 +3091,6 @@ class CCompiler:
             
             # Phase 4: Code Generation
             print("⚙️ Phase 4: Code Generation...")
-            self.code_generator = CodeGenerator()
             assembly_code = self.code_generator.generate(optimized_ast)
             
             # Phase 4.5: Assembly Optimization
@@ -2708,6 +3198,8 @@ def main():
                        help='Enable basic optimizations (default)')
     parser.add_argument('-O2', '--optimize-more', action='store_true',
                        help='Enable aggressive optimizations')
+    parser.add_argument('--no-advanced-regs', action='store_true',
+                       help='Disable advanced register allocation (use simple stack allocation)')
     
     if len(sys.argv) == 1:
         parser.print_help()
@@ -2734,6 +3226,10 @@ def main():
     elif args.optimize:
         compiler.set_optimization_level(1)
     # Default is already 1
+    
+    # Configure register allocation
+    if args.no_advanced_regs:
+        compiler.code_generator.set_advanced_allocation(False)
     
     if args.executable:
         # Compile to executable
