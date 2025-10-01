@@ -3,8 +3,8 @@ import random
 import time
 
 # Game configuration
-GAME_WIDTH = 600
-GAME_HEIGHT = 400
+GAME_WIDTH = 800
+GAME_HEIGHT = 600
 SPEED = 100  # Milliseconds between moves
 SPACE_SIZE = 20
 # Realistic snake colors with gradients
@@ -31,6 +31,8 @@ SPEED_BONUS_POINTS = 5  # Extra points for fast eating
 
 # Stage system configuration
 STAGE_PROGRESSION = 5  # Foods eaten needed to advance to next stage
+VICTORY_FOODS = 25  # Foods needed to win the game (reach stage 6)
+MAX_STAGE = 5  # Maximum stage number
 STAGE_BACKGROUNDS = {
     1: "#000000",  # Stage 1: Black (Classic)
     2: "#001122",  # Stage 2: Dark Blue (Ocean)
@@ -194,7 +196,24 @@ class BonusFood:
 class SnakeGame:
     def __init__(self, root):
         self.root = root
-        self.root.title("Snake Game (Tkinter)")
+        self.root.title("Snake Game - Vibe Python Edition")
+        
+        # Configure window size and appearance
+        self.root.configure(bg='#000000')
+        self.root.resizable(False, False)  # Fixed size window
+        
+        # Calculate window size including margins
+        window_width = GAME_WIDTH + 20  # Add padding
+        window_height = GAME_HEIGHT + 80  # Add space for label and padding
+        
+        # Center the window on screen
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        center_x = int(screen_width/2 - window_width/2)
+        center_y = int(screen_height/2 - window_height/2)
+        
+        self.root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
+        
         self.score = 0
         self.stage = 1
         self.current_bg_color = STAGE_BACKGROUNDS[1]
@@ -206,12 +225,30 @@ class SnakeGame:
         self.last_food_time = 0
         self.total_foods_eaten = 0
         self.stage_foods_eaten = 0
+        self.game_won = False  # Track if player has won
 
-        self.label = tk.Label(root, text=f"Score: {self.score} | Stage: {self.stage} - {STAGE_NAMES[1]}", font=('consolas', 16))
-        self.label.pack()
+        self.label = tk.Label(
+            root, 
+            text=f"Score: {self.score} | Stage: {self.stage} - {STAGE_NAMES[1]}", 
+            font=('Courier', 14, 'bold'), 
+            bg='#000000',
+            fg='#00FF00',
+            width=90,
+            pady=5
+        )
+        self.label.pack(padx=10, pady=(5, 0))
 
-        self.canvas = tk.Canvas(root, bg=self.current_bg_color, height=GAME_HEIGHT, width=GAME_WIDTH)
-        self.canvas.pack()
+        self.canvas = tk.Canvas(
+            root, 
+            bg=self.current_bg_color, 
+            height=GAME_HEIGHT, 
+            width=GAME_WIDTH,
+            highlightthickness=2,
+            highlightbackground='#333333',
+            relief='solid',
+            bd=1
+        )
+        self.canvas.pack(padx=10, pady=5, expand=False, fill=None)
 
         self.reset()
 
@@ -244,6 +281,7 @@ class SnakeGame:
         self.last_food_time = 0
         self.total_foods_eaten = 0
         self.stage_foods_eaten = 0
+        self.game_won = False
         
         self.create_background_effects()
         self.update_display()
@@ -340,7 +378,7 @@ class SnakeGame:
                 self.snake.squares.extend([body_bg, body_main, highlight_strip])
 
     def next_move(self):
-        if not self.running:
+        if not self.running or self.game_won:
             return
 
         x, y = self.snake.coordinates[0]
@@ -360,8 +398,8 @@ class SnakeGame:
 
         new_head = [x, y]
 
-        # Check only for self-collision
-        if self.check_self_collision(new_head):
+        # Check only for self-collision (must have body segments to collide)
+        if len(self.snake.coordinates) > 1 and self.check_self_collision(new_head):
             self.game_over()
             return
 
@@ -377,15 +415,27 @@ class SnakeGame:
             self.food.delete()  # Delete all food elements
             self.food = Food(self.canvas, self.snake)
             
+            # Check for victory condition
+            if self.total_foods_eaten >= VICTORY_FOODS and not self.game_won and self.running:
+                self.game_won = True
+                self.running = False  # Stop the game loop immediately
+                self.show_victory_screen()
+                return
+            
             # Check for stage progression (based on foods eaten, not score)
-            new_stage = min(5, (self.total_foods_eaten // STAGE_PROGRESSION) + 1)
-            if new_stage != self.stage:
-                self.stage = new_stage
-                self.current_bg_color = STAGE_BACKGROUNDS.get(self.stage, STAGE_BACKGROUNDS[5])
-                self.canvas.config(bg=self.current_bg_color)
-                self.clear_background_effects()
-                self.create_background_effects()
-                self.show_stage_message()
+            try:
+                new_stage = min(MAX_STAGE, (self.total_foods_eaten // STAGE_PROGRESSION) + 1)
+                if new_stage != self.stage and new_stage <= MAX_STAGE:
+                    self.stage = new_stage
+                    self.current_bg_color = STAGE_BACKGROUNDS.get(self.stage, STAGE_BACKGROUNDS[1])
+                    self.canvas.config(bg=self.current_bg_color)
+                    self.clear_background_effects()
+                    self.create_background_effects()
+                    self.show_stage_message()
+            except Exception as e:
+                print(f"Error in stage progression: {e}")
+                # Fallback to safe state
+                self.stage = min(MAX_STAGE, self.stage)
             
             # Spawn bonus food only once at specific food count
             if self.total_foods_eaten == BONUS_FOOD_SCORE and not self.bonus_food_spawned:
@@ -411,15 +461,23 @@ class SnakeGame:
         self.draw_snake()
         
         # Animate background effects
-        self.animate_background()
+        if self.running and not self.game_won:
+            try:
+                self.animate_background()
+            except Exception as e:
+                print(f"Error animating background: {e}")
         
         # Animate bonus food if it exists
-        if self.bonus_food:
-            self.bonus_food.animate(self.canvas)
+        if self.bonus_food and self.running and not self.game_won:
+            try:
+                self.bonus_food.animate(self.canvas)
+            except Exception as e:
+                print(f"Error animating bonus food: {e}")
         
-        # Adjust speed based on score
-        current_speed = self.get_current_speed()
-        self.root.after(current_speed, self.next_move)
+        # Continue game loop only if still running
+        if self.running and not self.game_won:
+            current_speed = self.get_current_speed()
+            self.root.after(current_speed, self.next_move)
 
     def change_direction(self, new_direction):
         opposites = {'up':'down', 'down':'up', 'left':'right', 'right':'left'}
@@ -435,22 +493,61 @@ class SnakeGame:
         return coord
     
     def check_self_collision(self, head):
-        """Check if the snake collides with itself"""
-        return head in self.snake.coordinates
+        """Check if the snake collides with itself (excluding current head)"""
+        # Don't check against the current head position, only body segments
+        body_segments = self.snake.coordinates[1:] if len(self.snake.coordinates) > 1 else []
+        return head in body_segments
     
     def update_display(self):
         """Update score and stage display"""
-        stage_name = STAGE_NAMES.get(self.stage, "Unknown")
-        multiplier = STAGE_MULTIPLIERS.get(self.stage, 1.0)
+        try:
+            # Validate stage number
+            if self.stage < 1 or self.stage > MAX_STAGE:
+                print(f"Invalid stage: {self.stage}, resetting to 1")
+                self.stage = 1
+                
+            stage_name = STAGE_NAMES.get(self.stage, "Unknown")
+            multiplier = STAGE_MULTIPLIERS.get(self.stage, 1.0)
+        except Exception as e:
+            print(f"Error updating display: {e}")
+            return
         
-        # Calculate progress to next stage
-        foods_in_current_stage = self.total_foods_eaten % STAGE_PROGRESSION
-        foods_needed = STAGE_PROGRESSION - foods_in_current_stage
+        # Calculate progress to next stage or victory
+        if self.game_won:
+            progress_text = " | VICTORY!"
+            combo_text = ""
+        elif self.total_foods_eaten >= VICTORY_FOODS:
+            progress_text = " | READY TO WIN!"
+            combo_text = ""
+        else:
+            foods_to_victory = VICTORY_FOODS - self.total_foods_eaten
+            foods_in_current_stage = self.total_foods_eaten % STAGE_PROGRESSION
+            foods_needed = STAGE_PROGRESSION - foods_in_current_stage
+            
+            combo_text = f" | COMBO x{self.combo_count}" if self.combo_count >= COMBO_THRESHOLD else ""
+            
+            if self.stage < MAX_STAGE:
+                progress_text = f" | Next: {foods_needed} foods | Victory: {foods_to_victory} foods"
+            else:
+                progress_text = f" | MAX STAGE | Victory: {foods_to_victory} foods"
         
-        combo_text = f" | COMBO x{self.combo_count}" if self.combo_count >= COMBO_THRESHOLD else ""
-        progress_text = f" | Next: {foods_needed} foods" if self.stage < 5 else " | MAX STAGE"
+        # Create shorter label text to prevent window resizing
+        base_text = f"Score: {self.score} | Stage: {self.stage} - {stage_name} (x{multiplier})"
+        if len(combo_text) > 0:
+            base_text += combo_text
         
-        self.label.config(text=f"Score: {self.score} | Stage: {self.stage} - {stage_name} (x{multiplier}){combo_text}{progress_text}")
+        # Truncate progress text if too long to prevent canvas width issues
+        if len(base_text + progress_text) > 80:  # Limit total length
+            if self.game_won:
+                short_progress = " | VICTORY!"
+            elif self.total_foods_eaten >= VICTORY_FOODS:
+                short_progress = " | READY TO WIN!"
+            else:
+                foods_to_victory = VICTORY_FOODS - self.total_foods_eaten
+                short_progress = f" | Victory in {foods_to_victory}"
+            self.label.config(text=base_text + short_progress)
+        else:
+            self.label.config(text=base_text + progress_text)
     
     def calculate_food_points(self):
         """Calculate points for regular food with bonuses"""
@@ -521,15 +618,120 @@ class SnakeGame:
         # Remove message after 2 seconds
         self.root.after(2000, lambda: self.canvas.delete(message))
     
+    def show_victory_screen(self):
+        """Show catchy victory celebration screen"""
+        self.running = False
+        
+        # Create celebration background
+        celebration_bg = self.canvas.create_rectangle(
+            0, 0, GAME_WIDTH, GAME_HEIGHT,
+            fill="#000033", outline="#FFD700", width=5
+        )
+        
+        # Main victory title with glow effect
+        title_glow = self.canvas.create_text(
+            GAME_WIDTH // 2 + 2, GAME_HEIGHT // 2 - 48,
+            font=('Arial', 36, 'bold'),
+            fill="#FFD700",
+            text="VICTORY!"
+        )
+        title_main = self.canvas.create_text(
+            GAME_WIDTH // 2, GAME_HEIGHT // 2 - 50,
+            font=('Arial', 36, 'bold'),
+            fill="#FFFFFF",
+            text="VICTORY!"
+        )
+        
+        # Victory message
+        victory_msg = self.canvas.create_text(
+            GAME_WIDTH // 2, GAME_HEIGHT // 2 - 10,
+            font=('Arial', 18),
+            fill="#00FF00",
+            text="SNAKE MASTER ACHIEVED!\nYou conquered all 5 stages!"
+        )
+        
+        # Score display
+        score_display = self.canvas.create_text(
+            GAME_WIDTH // 2, GAME_HEIGHT // 2 + 30,
+            font=('Arial', 16, 'bold'),
+            fill="#FFFF00",
+            text=f"Final Score: {self.score} points\nFoods Eaten: {self.total_foods_eaten}"
+        )
+        
+        # Restart instruction
+        restart_msg = self.canvas.create_text(
+            GAME_WIDTH // 2, GAME_HEIGHT // 2 + 70,
+            font=('Arial', 12),
+            fill="#CCCCCC",
+            text="Press any key to play again!"
+        )
+        
+        # Add celebration sparkles
+        sparkles = []
+        for _ in range(20):
+            x = random.randint(50, GAME_WIDTH - 50)
+            y = random.randint(50, GAME_HEIGHT - 50)
+            sparkle = self.canvas.create_text(
+                x, y, text=random.choice(["*", "+", ".", "o"]),
+                fill=random.choice(["#FFD700", "#FFFFFF", "#FFFF00", "#FF69B4"]),
+                font=("Arial", random.randint(12, 20))
+            )
+            sparkles.append(sparkle)
+        
+        # Animate sparkles
+        def animate_sparkles(frame=0):
+            if frame < 100:  # Animate for 100 frames
+                for sparkle in sparkles:
+                    if frame % 10 == 0:  # Every 10 frames
+                        # Twinkle effect
+                        current_color = self.canvas.itemcget(sparkle, "fill")
+                        new_color = "#FFFFFF" if current_color != "#FFFFFF" else "#FFD700"
+                        self.canvas.itemconfig(sparkle, fill=new_color)
+                self.root.after(100, lambda: animate_sparkles(frame + 1))
+        
+        animate_sparkles()
+        
+        # Bind key to restart
+        def restart_game(event):
+            try:
+                # Unbind the key event first
+                self.root.unbind('<Key>')
+                # Clear everything
+                self.canvas.delete("all")
+                # Reset game state
+                self.reset()
+                # Restart the game loop
+                self.running = True
+                self.next_move()
+            except Exception as e:
+                print(f"Error restarting game: {e}")
+        
+        self.root.bind('<Key>', restart_game)
+        self.root.focus_set()
+    
     def clear_background_effects(self):
         """Clear all background elements"""
-        for element in self.bg_elements:
-            self.canvas.delete(element)
-        self.bg_elements = []
+        try:
+            for element in self.bg_elements:
+                try:
+                    self.canvas.delete(element)
+                except Exception as e:
+                    print(f"Error deleting background element: {e}")
+            self.bg_elements = []
+        except Exception as e:
+            print(f"Error clearing background effects: {e}")
+            self.bg_elements = []  # Reset to empty list
     
     def create_background_effects(self):
         """Create stage-specific background effects"""
-        effects = STAGE_EFFECTS.get(self.stage, {})
+        try:
+            effects = STAGE_EFFECTS.get(self.stage, {})
+            if self.stage not in STAGE_EFFECTS:
+                print(f"Warning: No effects defined for stage {self.stage}")
+                return
+        except Exception as e:
+            print(f"Error creating background effects: {e}")
+            return
         
         if self.stage == 1:  # Starfield with depth
             # Distant stars
@@ -595,17 +797,22 @@ class SnakeGame:
                 self.bg_elements.append(vine)
                 
         elif self.stage == 5:  # Desert
-            # Sand dunes
-            for i in range(4):
-                x = i * 150
-                dune = self.canvas.create_arc(x, GAME_HEIGHT - 60, x + 200, GAME_HEIGHT, start=0, extent=180, outline="#AA8844", width=2, tags="background")
-                self.bg_elements.append(dune)
-            # Sand particles
-            for _ in range(effects.get("count", 35)):
-                x = random.randint(10, GAME_WIDTH - 10)
-                y = random.randint(10, GAME_HEIGHT - 10)
-                sand = self.canvas.create_oval(x, y, x + 2, y + 2, fill="#CCAA66", outline="#CCAA66", tags="background")
-                self.bg_elements.append(sand)
+            try:
+                # Sand dunes
+                for i in range(4):
+                    x = i * 150
+                    if x + 200 <= GAME_WIDTH:  # Ensure dune fits in canvas
+                        dune = self.canvas.create_arc(x, GAME_HEIGHT - 60, x + 200, GAME_HEIGHT, start=0, extent=180, outline="#AA8844", width=2, tags="background")
+                        self.bg_elements.append(dune)
+                # Sand particles
+                particle_count = min(35, effects.get("count", 35))  # Limit particles
+                for _ in range(particle_count):
+                    x = random.randint(10, GAME_WIDTH - 10)
+                    y = random.randint(10, GAME_HEIGHT - 10)
+                    sand = self.canvas.create_oval(x, y, x + 2, y + 2, fill="#CCAA66", outline="#CCAA66", tags="background")
+                    self.bg_elements.append(sand)
+            except Exception as e:
+                print(f"Error creating desert effects: {e}")
     
     def animate_background(self):
         """Animate background elements"""
@@ -642,10 +849,12 @@ class SnakeGame:
             return max(90, SPEED - (foods_eaten - 10) * 1)
         elif foods_eaten <= 40:
             # Moderate speed increase: 90ms -> 80ms over 20 foods  
-            return max(80, 90 - (foods_eaten - 20) * 0.5)
+            # Use integer division to avoid float results
+            return max(80, 90 - (foods_eaten - 20) // 2)
         elif foods_eaten <= 60:
             # Slower progression: 80ms -> 75ms over 20 foods
-            return max(75, 80 - (foods_eaten - 40) * 0.25)
+            # Use integer division to avoid float results  
+            return max(75, 80 - (foods_eaten - 40) // 4)
         else:
             # Cap at reasonable maximum speed
             return 75  # Never faster than 75ms (still playable)
@@ -661,5 +870,17 @@ class SnakeGame:
 
 if __name__ == "__main__":
     root = tk.Tk()
+    
+    # Set window icon and properties
+    try:
+        root.iconname("Snake Game")
+    except:
+        pass  # Icon setting might fail on some systems
+    
     game = SnakeGame(root)
+    
+    # Make sure window is focused
+    root.focus_force()
+    root.lift()
+    
     root.mainloop()
