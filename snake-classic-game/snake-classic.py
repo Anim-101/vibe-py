@@ -8,7 +8,10 @@ SPEED = 100  # Milliseconds between moves
 SPACE_SIZE = 20
 SNAKE_COLOR = "#00FF00"
 FOOD_COLOR = "#FF0000"
+BONUS_FOOD_COLOR = "#FFD700"  # Gold color for bonus food
 BG_COLOR = "#000000"
+BONUS_FOOD_SCORE = 10  # Score at which bonus food appears
+BONUS_FOOD_POINTS = 5  # Extra points from bonus food
 
 class Snake:
     def __init__(self):
@@ -34,6 +37,25 @@ class Food:
         self.square = self.canvas.create_oval(
             x, y, x + SPACE_SIZE, y + SPACE_SIZE,
             fill=FOOD_COLOR, tag="food"
+        )
+        
+class BonusFood:
+    def __init__(self, canvas, snake, regular_food):
+        self.canvas = canvas
+        self.place_new(snake, regular_food)
+
+    def place_new(self, snake, regular_food):
+        while True:
+            x = random.randint(0, (GAME_WIDTH // SPACE_SIZE) - 1) * SPACE_SIZE
+            y = random.randint(0, (GAME_HEIGHT // SPACE_SIZE) - 1) * SPACE_SIZE
+            if ([x, y] not in snake.coordinates and 
+                x != regular_food.x and y != regular_food.y):
+                break
+        self.x = x
+        self.y = y
+        self.square = self.canvas.create_oval(
+            x, y, x + SPACE_SIZE, y + SPACE_SIZE,
+            fill=BONUS_FOOD_COLOR, tag="bonus_food"
         )
         
 class SnakeGame:
@@ -64,6 +86,9 @@ class SnakeGame:
         self.draw_snake()
         
         self.food = Food(self.canvas, self.snake)
+        self.bonus_food = None
+        self.bonus_food_spawned = False  # Track if bonus food has been spawned
+        
         self.score = 0
         self.label.config(text=f"Score: {self.score}")
 
@@ -105,13 +130,26 @@ class SnakeGame:
 
         self.snake.coordinates.insert(0, new_head)
 
-        # Food collision
+        # Check collision with regular food
         if x == self.food.x and y == self.food.y:
             self.score += 1
             self.label.config(text=f"Score: {self.score}")
             self.canvas.delete(self.food.square)
-            self.food.place_new(self.snake)
+            self.food = Food(self.canvas, self.snake)
+            
+            # Spawn bonus food only once at specific score
+            if self.score == BONUS_FOOD_SCORE and not self.bonus_food_spawned:
+                self.bonus_food = BonusFood(self.canvas, self.snake, self.food)
+                self.bonus_food_spawned = True
+                
+        # Check collision with bonus food (if it exists)
+        elif self.bonus_food and x == self.bonus_food.x and y == self.bonus_food.y:
+            self.score += BONUS_FOOD_POINTS
+            self.label.config(text=f"Score: {self.score}")
+            self.canvas.delete(self.bonus_food.square)
+            self.bonus_food = None
         else:
+            # No food eaten, remove tail
             self.snake.coordinates.pop()
 
         self.draw_snake()
