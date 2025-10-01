@@ -795,15 +795,15 @@ class SnakeGame:
             for _ in range(15):
                 x = random.randint(10, GAME_WIDTH - 10)
                 y = random.randint(10, GAME_HEIGHT - 10)
-                star = self.canvas.create_text(x, y, text="✦", fill="#FFFFFF", font=("Arial", 8), tags="background")
+                star = self.canvas.create_oval(x, y, x + 2, y + 2, fill="#FFFFFF", tags="background")
                 self.bg_elements.append(star)
             # Bright stars
             for _ in range(8):
                 x = random.randint(15, GAME_WIDTH - 15)
                 y = random.randint(15, GAME_HEIGHT - 15)
                 # Star with glow
-                glow = self.canvas.create_text(x, y, text="✧", fill="#AAAAFF", font=("Arial", 12), tags="background")
-                star = self.canvas.create_text(x, y, text="✧", fill="#FFFFFF", font=("Arial", 8), tags="background")
+                glow = self.canvas.create_oval(x-2, y-2, x+2, y+2, fill="#AAAAFF", tags="background")
+                star = self.canvas.create_oval(x, y, x + 1, y + 1, fill="#FFFFFF", tags="background")
                 self.bg_elements.extend([glow, star])
                 
         elif self.stage == 2:  # Ocean bubbles and waves
@@ -825,13 +825,13 @@ class SnakeGame:
             for _ in range(effects.get("count", 25)):
                 x = random.randint(10, GAME_WIDTH - 10)
                 y = random.randint(10, GAME_HEIGHT - 10)
-                crystal = self.canvas.create_text(x, y, text="◆", fill="#AA44AA", font=("Arial", random.randint(8, 16)), tags="background")
+                crystal = self.canvas.create_oval(x, y, x + 6, y + 6, fill="#AA44AA", tags="background")
                 self.bg_elements.append(crystal)
             # Sparkles
             for _ in range(20):
                 x = random.randint(10, GAME_WIDTH - 10)
                 y = random.randint(10, GAME_HEIGHT - 10)
-                sparkle = self.canvas.create_text(x, y, text="✨", fill="#FFAAFF", font=("Arial", 6), tags="background")
+                sparkle = self.canvas.create_oval(x, y, x + 2, y + 2, fill="#FFAAFF", tags="background")
                 self.bg_elements.append(sparkle)
                 
         elif self.stage == 4:  # Jungle
@@ -839,7 +839,7 @@ class SnakeGame:
             for _ in range(effects.get("count", 40)):
                 x = random.randint(10, GAME_WIDTH - 10)
                 y = random.randint(10, GAME_HEIGHT - 10)
-                leaf = self.canvas.create_text(x, y, text="🍃", fill="#44AA44", font=("Arial", random.randint(8, 14)), tags="background")
+                leaf = self.canvas.create_oval(x, y, x + 4, y + 6, fill="#44AA44", tags="background")
                 self.bg_elements.append(leaf)
             # Vine patterns
             for i in range(3):
