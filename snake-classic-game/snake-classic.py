@@ -92,9 +92,14 @@ class SnakeGame:
         elif self.direction == 'right':
             x += SPACE_SIZE
 
+        # Handle edge wrapping
+        x = self.wrap_coordinate(x, GAME_WIDTH)
+        y = self.wrap_coordinate(y, GAME_HEIGHT)
+
         new_head = [x, y]
 
-        if self.check_collisions(new_head):
+        # Check only for self-collision
+        if self.check_self_collision(new_head):
             self.game_over()
             return
 
@@ -117,13 +122,17 @@ class SnakeGame:
         if opposites[new_direction] != self.direction:
             self.direction = new_direction
 
-    def check_collisions(self, head):
-        x, y = head
-        if x < 0 or x >= GAME_WIDTH or y < 0 or y >= GAME_HEIGHT:
-            return True
-        if head in self.snake.coordinates:
-            return True
-        return False
+    def wrap_coordinate(self, coord, max_size):
+        """Wrap coordinate around the game boundary"""
+        if coord < 0:
+            return max_size - SPACE_SIZE
+        elif coord >= max_size:
+            return 0
+        return coord
+    
+    def check_self_collision(self, head):
+        """Check if the snake collides with itself"""
+        return head in self.snake.coordinates
 
     def game_over(self):
         self.running = False
