@@ -1323,6 +1323,455 @@ class SemanticAnalyzer:
         return func_symbol.return_type
 
 # ============================================================================
+# CODE GENERATOR (x86-64 ASSEMBLY)
+# ============================================================================
+
+class Register:
+    """Represents an x86-64 register."""
+    def __init__(self, name: str, size: int = 64):
+        self.name = name
+        self.size = size  # 8, 16, 32, or 64 bits
+        self.is_used = False
+    
+    def __str__(self):
+        return f"%{self.name}"
+    
+    def get_size_variant(self, size: int) -> str:
+        """Get register name for specific size."""
+        if self.name in ["rax", "eax", "ax", "al"]:
+            if size == 64: return "rax"
+            elif size == 32: return "eax"
+            elif size == 16: return "ax"
+            elif size == 8: return "al"
+        elif self.name in ["rbx", "ebx", "bx", "bl"]:
+            if size == 64: return "rbx"
+            elif size == 32: return "ebx"
+            elif size == 16: return "bx"
+            elif size == 8: return "bl"
+        elif self.name in ["rcx", "ecx", "cx", "cl"]:
+            if size == 64: return "rcx"
+            elif size == 32: return "ecx"
+            elif size == 16: return "cx"
+            elif size == 8: return "cl"
+        elif self.name in ["rdx", "edx", "dx", "dl"]:
+            if size == 64: return "rdx"
+            elif size == 32: return "edx"
+            elif size == 16: return "dx"
+            elif size == 8: return "dl"
+        # Add more registers as needed
+        return self.name
+
+class RegisterAllocator:
+    """Simple register allocator for code generation."""
+    
+    def __init__(self):
+        self.registers = {
+            'rax': Register('rax'),
+            'rbx': Register('rbx'),
+            'rcx': Register('rcx'),
+            'rdx': Register('rdx'),
+            'rsi': Register('rsi'),
+            'rdi': Register('rdi'),
+            'r8': Register('r8'),
+            'r9': Register('r9'),
+            'r10': Register('r10'),
+            'r11': Register('r11'),
+        }
+        
+        # Calling convention registers
+        self.param_registers = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
+        self.return_register = 'rax'
+        
+        # Stack management
+        self.stack_offset = 0
+        self.local_vars = {}  # Maps variable names to stack offsets
+        
+    def allocate_register(self) -> Optional[str]:
+        """Allocate an available register."""
+        for name, reg in self.registers.items():
+            if not reg.is_used and name not in ['rsp', 'rbp']:
+                reg.is_used = True
+                return name
+        return None
+    
+    def free_register(self, name: str):
+        """Free a register for reuse."""
+        if name in self.registers:
+            self.registers[name].is_used = False
+    
+    def get_param_register(self, index: int) -> Optional[str]:
+        """Get register for function parameter by index."""
+        if 0 <= index < len(self.param_registers):
+            return self.param_registers[index]
+        return None
+    
+    def allocate_stack_space(self, var_name: str, size: int = 8) -> int:
+        """Allocate space on stack for local variable."""
+        self.stack_offset += size
+        self.local_vars[var_name] = self.stack_offset
+        return self.stack_offset
+
+class CodeGenerator:
+    """
+    x86-64 Assembly Code Generator for C programs.
+    
+    Generates GNU assembler (GAS) syntax assembly code from validated AST.
+    Supports:
+    - Function declarations and calls
+    - Variable declarations and access
+    - Arithmetic and logical expressions
+    - Control flow (if/while/for statements)
+    - Stack management and calling conventions
+    """
+    
+    def __init__(self):
+        self.output = []  # Generated assembly code lines
+        self.register_allocator = RegisterAllocator()
+        self.label_counter = 0
+        self.current_function = None
+        
+    def generate_label(self, prefix: str = "L") -> str:
+        """Generate unique label for jumps and branches."""
+        self.label_counter += 1
+        return f"{prefix}{self.label_counter}"
+    
+    def emit(self, instruction: str, comment: str = ""):
+        """Emit assembly instruction with optional comment."""
+        if comment:
+            self.output.append(f"    {instruction:<30} # {comment}")
+        else:
+            self.output.append(f"    {instruction}")
+    
+    def emit_label(self, label: str):
+        """Emit assembly label."""
+        self.output.append(f"{label}:")
+    
+    def emit_directive(self, directive: str):
+        """Emit assembler directive."""
+        self.output.append(directive)
+    
+    def generate(self, ast: Program) -> str:
+        """Generate complete assembly program from AST."""
+        print("⚙️ Generating x86-64 assembly code...")
+        
+        # Emit program header
+        self.emit_directive(".section .text")
+        self.emit_directive(".global _start")
+        
+        # Generate code for all declarations
+        for declaration in ast.declarations:
+            self.generate_declaration(declaration)
+        
+        # Add program entry point if no main function
+        if not any(isinstance(d, FunctionDeclaration) and d.name == "main" 
+                  for d in ast.declarations):
+            self.emit_directive("")
+            self.emit_label("_start")
+            self.emit("mov $60, %rax", "exit syscall")
+            self.emit("mov $0, %rdi", "exit status")
+            self.emit("syscall", "invoke system call")
+        
+        # Join all output lines
+        return "\n".join(self.output)
+    
+    def generate_declaration(self, node: ASTNode):
+        """Generate code for top-level declaration."""
+        if isinstance(node, FunctionDeclaration):
+            self.generate_function(node)
+        elif isinstance(node, VariableDeclaration):
+            self.generate_global_variable(node)
+    
+    def generate_global_variable(self, node: VariableDeclaration):
+        """Generate code for global variable declaration."""
+        self.emit_directive(".section .data")
+        if node.initializer:
+            if isinstance(node.initializer, IntegerLiteral):
+                self.emit_directive(f"{node.name}: .quad {node.initializer.value}")
+            else:
+                self.emit_directive(f"{node.name}: .quad 0")
+        else:
+            self.emit_directive(f"{node.name}: .quad 0")
+        self.emit_directive(".section .text")
+    
+    def generate_function(self, node: FunctionDeclaration):
+        """Generate code for function declaration."""
+        if not node.body:
+            return  # Skip function declarations without bodies
+        
+        print(f"   Generating function: {node.name}")
+        self.current_function = node
+        
+        # Reset register allocator for new function
+        self.register_allocator = RegisterAllocator()
+        
+        # Function label
+        self.emit_directive("")
+        if node.name == "main":
+            self.emit_label("_start")
+        else:
+            self.emit_label(node.name)
+        
+        # Function prologue
+        self.emit("pushq %rbp", "save old base pointer")
+        self.emit("movq %rsp, %rbp", "establish new base pointer")
+        
+        # Allocate space for local variables (simplified)
+        local_space = len([stmt for stmt in self.collect_local_vars(node.body)]) * 8
+        if local_space > 0:
+            self.emit(f"subq ${local_space}, %rsp", "allocate local variable space")
+        
+        # Store parameters in local variables
+        for i, param in enumerate(node.parameters):
+            param_reg = self.register_allocator.get_param_register(i)
+            if param_reg:
+                offset = self.register_allocator.allocate_stack_space(param.name)
+                self.emit(f"movq %{param_reg}, -{offset}(%rbp)", f"store parameter {param.name}")
+        
+        # Generate function body
+        self.generate_statement(node.body)
+        
+        # Function epilogue (in case no return statement)
+        self.generate_function_epilogue(node.name)
+    
+    def collect_local_vars(self, node: ASTNode) -> List[str]:
+        """Collect all local variable names for stack allocation."""
+        vars_list = []
+        if isinstance(node, CompoundStatement):
+            for stmt in node.statements:
+                if isinstance(stmt, VariableDeclaration):
+                    vars_list.append(stmt.name)
+                vars_list.extend(self.collect_local_vars(stmt))
+        elif isinstance(node, IfStatement):
+            vars_list.extend(self.collect_local_vars(node.then_statement))
+            if node.else_statement:
+                vars_list.extend(self.collect_local_vars(node.else_statement))
+        elif isinstance(node, WhileStatement):
+            vars_list.extend(self.collect_local_vars(node.body))
+        # Add more statement types as needed
+        return vars_list
+    
+    def generate_function_epilogue(self, func_name: str):
+        """Generate function epilogue and return."""
+        self.emit_label(f"{func_name}_epilogue")
+        
+        if func_name == "main":
+            # Main function - exit program
+            self.emit("mov $60, %rax", "exit syscall")
+            self.emit("mov $0, %rdi", "exit status 0")
+            self.emit("syscall", "invoke system call")
+        else:
+            # Regular function return
+            self.emit("movq %rbp, %rsp", "restore stack pointer")
+            self.emit("popq %rbp", "restore old base pointer")
+            self.emit("ret", "return to caller")
+    
+    def generate_statement(self, node: ASTNode):
+        """Generate code for any statement."""
+        if isinstance(node, CompoundStatement):
+            for stmt in node.statements:
+                self.generate_statement(stmt)
+        
+        elif isinstance(node, VariableDeclaration):
+            self.generate_variable_declaration(node)
+        
+        elif isinstance(node, ExpressionStatement):
+            if node.expression:
+                self.generate_expression(node.expression)
+        
+        elif isinstance(node, ReturnStatement):
+            self.generate_return_statement(node)
+        
+        elif isinstance(node, IfStatement):
+            self.generate_if_statement(node)
+        
+        elif isinstance(node, WhileStatement):
+            self.generate_while_statement(node)
+        
+        # Add more statement types as needed
+    
+    def generate_variable_declaration(self, node: VariableDeclaration):
+        """Generate code for local variable declaration."""
+        # Allocate stack space
+        offset = self.register_allocator.allocate_stack_space(node.name)
+        
+        if node.initializer:
+            # Generate code for initializer and store result
+            result_reg = self.generate_expression(node.initializer)
+            if result_reg:
+                self.emit(f"movq %{result_reg}, -{offset}(%rbp)", f"store {node.name}")
+                self.register_allocator.free_register(result_reg)
+    
+    def generate_return_statement(self, node: ReturnStatement):
+        """Generate code for return statement."""
+        if node.expression:
+            # Generate expression and move result to return register
+            result_reg = self.generate_expression(node.expression)
+            if result_reg and result_reg != 'rax':
+                self.emit(f"movq %{result_reg}, %rax", "move return value to rax")
+                self.register_allocator.free_register(result_reg)
+        
+        # Jump to function epilogue
+        if self.current_function:
+            self.emit(f"jmp {self.current_function.name}_epilogue", "return from function")
+    
+    def generate_if_statement(self, node: IfStatement):
+        """Generate code for if statement."""
+        else_label = self.generate_label("else")
+        end_label = self.generate_label("end_if")
+        
+        # Generate condition
+        cond_reg = self.generate_expression(node.condition)
+        if cond_reg:
+            self.emit(f"testq %{cond_reg}, %{cond_reg}", "test condition")
+            self.emit(f"jz {else_label}", "jump if false")
+            self.register_allocator.free_register(cond_reg)
+        
+        # Generate then statement
+        self.generate_statement(node.then_statement)
+        self.emit(f"jmp {end_label}", "skip else part")
+        
+        # Generate else statement
+        self.emit_label(else_label)
+        if node.else_statement:
+            self.generate_statement(node.else_statement)
+        
+        self.emit_label(end_label)
+    
+    def generate_while_statement(self, node: WhileStatement):
+        """Generate code for while loop."""
+        loop_start = self.generate_label("while_start")
+        loop_end = self.generate_label("while_end")
+        
+        # Loop start
+        self.emit_label(loop_start)
+        
+        # Generate condition
+        cond_reg = self.generate_expression(node.condition)
+        if cond_reg:
+            self.emit(f"testq %{cond_reg}, %{cond_reg}", "test loop condition")
+            self.emit(f"jz {loop_end}", "exit if false")
+            self.register_allocator.free_register(cond_reg)
+        
+        # Generate body
+        self.generate_statement(node.body)
+        
+        # Jump back to condition
+        self.emit(f"jmp {loop_start}", "repeat loop")
+        
+        # Loop end
+        self.emit_label(loop_end)
+    
+    def generate_expression(self, node: ASTNode) -> Optional[str]:
+        """Generate code for expression and return register containing result."""
+        if isinstance(node, IntegerLiteral):
+            reg = self.register_allocator.allocate_register()
+            if reg:
+                self.emit(f"movq ${node.value}, %{reg}", f"load integer {node.value}")
+            return reg
+        
+        elif isinstance(node, Identifier):
+            # Load variable from stack or global
+            if node.name in self.register_allocator.local_vars:
+                offset = self.register_allocator.local_vars[node.name]
+                reg = self.register_allocator.allocate_register()
+                if reg:
+                    self.emit(f"movq -{offset}(%rbp), %{reg}", f"load {node.name}")
+                return reg
+            else:
+                # Global variable
+                reg = self.register_allocator.allocate_register()
+                if reg:
+                    self.emit(f"movq {node.name}(%rip), %{reg}", f"load global {node.name}")
+                return reg
+        
+        elif isinstance(node, BinaryExpression):
+            return self.generate_binary_expression(node)
+        
+        elif isinstance(node, AssignmentExpression):
+            return self.generate_assignment_expression(node)
+        
+        elif isinstance(node, CallExpression):
+            return self.generate_call_expression(node)
+        
+        return None
+    
+    def generate_binary_expression(self, node: BinaryExpression) -> Optional[str]:
+        """Generate code for binary expression."""
+        # Generate left operand
+        left_reg = self.generate_expression(node.left)
+        
+        # Generate right operand
+        right_reg = self.generate_expression(node.right)
+        
+        if not left_reg or not right_reg:
+            return None
+        
+        # Perform operation
+        if node.operator == '+':
+            self.emit(f"addq %{right_reg}, %{left_reg}", "add operation")
+        elif node.operator == '-':
+            self.emit(f"subq %{right_reg}, %{left_reg}", "subtract operation")
+        elif node.operator == '*':
+            self.emit(f"imulq %{right_reg}, %{left_reg}", "multiply operation")
+        elif node.operator == '<':
+            self.emit(f"cmpq %{right_reg}, %{left_reg}", "compare for less than")
+            self.emit(f"setl %al", "set result of comparison")
+            self.emit(f"movzbq %al, %{left_reg}", "zero-extend result")
+        elif node.operator == '>':
+            self.emit(f"cmpq %{right_reg}, %{left_reg}", "compare for greater than")
+            self.emit(f"setg %al", "set result of comparison")
+            self.emit(f"movzbq %al, %{left_reg}", "zero-extend result")
+        # Add more operators as needed
+        
+        # Free right register, return left register with result
+        self.register_allocator.free_register(right_reg)
+        return left_reg
+    
+    def generate_assignment_expression(self, node: AssignmentExpression) -> Optional[str]:
+        """Generate code for assignment expression."""
+        if not isinstance(node.left, Identifier):
+            return None
+        
+        var_name = node.left.name
+        
+        # Generate right-hand side
+        rhs_reg = self.generate_expression(node.right)
+        if not rhs_reg:
+            return None
+        
+        # Store to variable
+        if var_name in self.register_allocator.local_vars:
+            offset = self.register_allocator.local_vars[var_name]
+            self.emit(f"movq %{rhs_reg}, -{offset}(%rbp)", f"assign to {var_name}")
+        else:
+            # Global variable
+            self.emit(f"movq %{rhs_reg}, {var_name}(%rip)", f"assign to global {var_name}")
+        
+        return rhs_reg
+    
+    def generate_call_expression(self, node: CallExpression) -> Optional[str]:
+        """Generate code for function call."""
+        if not isinstance(node.function, Identifier):
+            return None
+        
+        func_name = node.function.name
+        
+        # Generate arguments and place in parameter registers
+        for i, arg in enumerate(node.arguments):
+            arg_reg = self.generate_expression(arg)
+            param_reg = self.register_allocator.get_param_register(i)
+            
+            if arg_reg and param_reg and arg_reg != param_reg:
+                self.emit(f"movq %{arg_reg}, %{param_reg}", f"pass argument {i}")
+                self.register_allocator.free_register(arg_reg)
+        
+        # Call function
+        self.emit(f"call {func_name}", f"call function {func_name}")
+        
+        # Return value is in rax
+        return 'rax'
+
+# ============================================================================
 # LEXICAL ANALYZER (TOKENIZER)
 # ============================================================================
 
@@ -1641,8 +2090,18 @@ class CCompiler:
             
             print("   ✅ Semantic analysis completed successfully!")
             
-            # TODO: Phase 4: Code Generation  
-            print("⚙️ Phase 4: Code Generation - TODO")
+            # Phase 4: Code Generation
+            print("⚙️ Phase 4: Code Generation...")
+            self.code_generator = CodeGenerator()
+            assembly_code = self.code_generator.generate(ast)
+            
+            # Write assembly to output file
+            output_filename = source_file.replace('.c', '.s')
+            with open(output_filename, 'w') as f:
+                f.write(assembly_code)
+            
+            print(f"   ✅ Generated assembly code: {output_filename}")
+            print(f"   Generated {len(assembly_code.split())} lines of x86-64 assembly")
             
             # TODO: Phase 5: Assembly & Linking
             print("🔗 Phase 5: Assembly & Linking - TODO")
@@ -1659,6 +2118,55 @@ class CCompiler:
         except Exception as e:
             print(f"❌ Compilation Error: {e}")
             return False
+    
+    def compile_to_executable(self, source_file: str, output_file: str = None) -> bool:
+        """Compile C source to executable binary."""
+        try:
+            # First compile to assembly
+            if not self.compile(source_file):
+                return False
+            
+            # Determine file names
+            assembly_file = source_file.replace('.c', '.s')
+            if not output_file:
+                output_file = source_file.replace('.c', '')
+            
+            # Phase 5: Assembly & Linking
+            print("🔗 Phase 5: Assembly & Linking...")
+            
+            # Use GNU assembler and linker
+            import subprocess
+            
+            # Assemble to object file
+            object_file = source_file.replace('.c', '.o')
+            assemble_cmd = ['as', '--64', '-o', object_file, assembly_file]
+            
+            result = subprocess.run(assemble_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"❌ Assembly failed: {result.stderr}")
+                return False
+            
+            print(f"   ✅ Assembled object file: {object_file}")
+            
+            # Link to executable
+            link_cmd = ['ld', '-o', output_file, object_file]
+            
+            result = subprocess.run(link_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"❌ Linking failed: {result.stderr}")
+                return False
+            
+            print(f"   ✅ Created executable: {output_file}")
+            print(f"   Run with: ./{output_file}")
+            
+            return True
+            
+        except FileNotFoundError as e:
+            print(f"❌ Tool not found: {e}. Install GNU binutils (as, ld)")
+            return False
+        except Exception as e:
+            print(f"❌ Build error: {e}")
+            return False
 
 # ============================================================================
 # COMMAND LINE INTERFACE
@@ -1666,26 +2174,46 @@ class CCompiler:
 
 def main():
     """Main entry point for the C compiler."""
-    if len(sys.argv) < 2:
-        print("🔧 VIBE-PY C Compiler")
-        print("Usage: python c-compiler.py <source_file.c> [output_file]")
-        print("\nExample:")
-        print("  python c-compiler.py hello.c")
-        print("  python c-compiler.py program.c my_program")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='🔧 VIBE-PY C Compiler')
+    parser.add_argument('source', help='C source file (.c)')
+    parser.add_argument('-o', '--output', help='Output file name')
+    parser.add_argument('-S', '--assembly', action='store_true', 
+                       help='Generate assembly only (.s file)')
+    parser.add_argument('-c', '--compile-only', action='store_true',
+                       help='Compile to object file only (.o)')
+    parser.add_argument('--executable', action='store_true',
+                       help='Compile to executable binary (requires GNU binutils)')
+    
+    if len(sys.argv) == 1:
+        parser.print_help()
+        print("\n📖 Examples:")
+        print("  python3 c-compiler.py program.c                    # Generate assembly")
+        print("  python3 c-compiler.py program.c -S                 # Generate assembly only")
+        print("  python3 c-compiler.py program.c --executable       # Create executable")
+        print("  python3 c-compiler.py program.c -o my_program      # Specify output name")
         sys.exit(1)
     
-    source_file = sys.argv[1]
-    output_file = sys.argv[2] if len(sys.argv) > 2 else None
+    args = parser.parse_args()
     
-    if not source_file.endswith('.c'):
+    if not args.source.endswith('.c'):
         print("❌ Error: Source file must have .c extension")
         sys.exit(1)
     
     compiler = CCompiler()
-    success = compiler.compile(source_file, output_file)
+    
+    if args.executable:
+        # Compile to executable
+        success = compiler.compile_to_executable(args.source, args.output)
+    else:
+        # Default: compile to assembly
+        success = compiler.compile(args.source, args.output)
     
     if not success:
         sys.exit(1)
+    
+    print("🎉 Compilation completed successfully!")
 
 if __name__ == "__main__":
     main()

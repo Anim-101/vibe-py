@@ -48,7 +48,7 @@
 - Multi-level scoping (global, function, block levels)
 - Symbol lookup from current scope to global
 - Duplicate declaration detection within same scope
-Built-in C types: int, float, char, void, double
+- Built-in C types: int, float, char, void, double
 - Type compatibility checking for operations
 - Type promotion (int → float when needed)
 - Assignment type validation
@@ -66,3 +66,28 @@ Built-in C types: int, float, char, void, double
 - Duplicate declarations in same scope
 - Wrong argument counts in function calls
 - Detailed error messages with context
+
+# Scenario 5
+
+- Complete GNU assembler syntax with proper sections (.text, .data)
+- Register allocation system with 10 general-purpose registers
+- System V AMD64 calling convention (rdi, rsi, rdx, rcx, r8, r9 for parameters)
+- Stack frame management with proper prologue/epilogue
+- Label generation system for control flow constructs
+- Function declarations with parameter passing via registers
+- Function calls with argument setup and return value handling
+- Recursive functions (factorial example works perfectly!)
+- Local variable allocation on stack with proper offsets
+- Return statements with value propagation to RAX register
+- Arithmetic operations (+, -, *, with proper register usage)
+- Comparison operations (<, >, with conditional flags and zero-extension)
+- Variable access (local variables from stack, globals from .data section)
+- Assignment expressions with proper memory operations
+- Integer literals loaded as immediate values
+- If/else statements with proper conditional jumps and labels
+- While loops with start/end labels and conditional exits
+- Proper branching logic using TEST, CMP, JZ, JMP instructions
+- Complex nested control structures handled correctly
+- Global variables allocated in .data section with initial values
+- Local variables allocated on stack with negative RBP offsets
+- Parameter passing following x86-64 calling convention
