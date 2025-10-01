@@ -1,6 +1,7 @@
 import tkinter as tk
 import random
 import time
+import re
 
 # Game configuration
 GAME_WIDTH = 800
@@ -226,14 +227,18 @@ class SnakeGame:
         self.total_foods_eaten = 0
         self.stage_foods_eaten = 0
         self.game_won = False  # Track if player has won
+        
+        # Timestamp tracking
+        self.start_time = time.time()
+        self.session_start = time.strftime("%H:%M:%S", time.localtime(self.start_time))
 
         self.label = tk.Label(
             root, 
-            text=f"Score: {self.score} | Stage: {self.stage} - {STAGE_NAMES[1]}", 
+            text=f"Score: {self.score} | Stage: {self.stage} - {STAGE_NAMES[1]} | Time: 00:00", 
             font=('Courier', 14, 'bold'), 
             bg='#000000',
             fg='#00FF00',
-            width=90,
+            width=100,
             pady=5
         )
         self.label.pack(padx=10, pady=(5, 0))
@@ -258,6 +263,10 @@ class SnakeGame:
         root.bind('<Down>', lambda event: self.change_direction('down'))
 
         self.running = True
+        
+        # Start real-time timestamp updates
+        self.update_timestamp_display()
+        
         self.next_move()
 
     def reset(self):
@@ -282,6 +291,14 @@ class SnakeGame:
         self.total_foods_eaten = 0
         self.stage_foods_eaten = 0
         self.game_won = False
+        
+        # Reset timestamp
+        self.start_time = time.time()
+        self.session_start = time.strftime("%H:%M:%S", time.localtime(self.start_time))
+        
+        # Restart real-time timestamp updates if game is running
+        if hasattr(self, 'running') and self.running:
+            self.root.after(100, self.update_timestamp_display)
         
         self.create_background_effects()
         self.update_display()
@@ -498,6 +515,33 @@ class SnakeGame:
         body_segments = self.snake.coordinates[1:] if len(self.snake.coordinates) > 1 else []
         return head in body_segments
     
+    def get_elapsed_time(self):
+        """Get formatted elapsed time since game start"""
+        elapsed_seconds = int(time.time() - self.start_time)
+        minutes = elapsed_seconds // 60
+        seconds = elapsed_seconds % 60
+        return f"{minutes:02d}:{seconds:02d}"
+    
+    def update_timestamp_display(self):
+        """Update timestamp in real-time every second"""
+        if self.running and not self.game_won:
+            try:
+                # Get current display text and update only the timestamp part
+                current_text = self.label.cget("text")
+                
+                # Find and replace the time portion
+                import re
+                elapsed_time = self.get_elapsed_time()
+                # Replace the time pattern (MM:SS) in the current text
+                updated_text = re.sub(r'Time: \d{2}:\d{2}', f'Time: {elapsed_time}', current_text)
+                self.label.config(text=updated_text)
+                
+            except Exception as e:
+                print(f"Error updating timestamp: {e}")
+            
+            # Schedule next update in 1 second
+            self.root.after(1000, self.update_timestamp_display)
+    
     def update_display(self):
         """Update score and stage display"""
         try:
@@ -531,13 +575,17 @@ class SnakeGame:
             else:
                 progress_text = f" | MAX STAGE | Victory: {foods_to_victory} foods"
         
-        # Create shorter label text to prevent window resizing
-        base_text = f"Score: {self.score} | Stage: {self.stage} - {stage_name} (x{multiplier})"
+        # Create shorter label text to prevent window resizing (timestamp updated separately)
+        base_text = f"Score: {self.score} | Stage: {self.stage} - {stage_name} (x{multiplier}) | Time: 00:00"
         if len(combo_text) > 0:
             base_text += combo_text
         
+        # Get current elapsed time for this update
+        elapsed_time = self.get_elapsed_time()
+        base_text_with_time = f"Score: {self.score} | Stage: {self.stage} - {stage_name} (x{multiplier}) | Time: {elapsed_time}"
+        
         # Truncate progress text if too long to prevent canvas width issues
-        if len(base_text + progress_text) > 80:  # Limit total length
+        if len(base_text_with_time + progress_text) > 90:  # Slightly increased limit for timestamp
             if self.game_won:
                 short_progress = " | VICTORY!"
             elif self.total_foods_eaten >= VICTORY_FOODS:
@@ -545,9 +593,9 @@ class SnakeGame:
             else:
                 foods_to_victory = VICTORY_FOODS - self.total_foods_eaten
                 short_progress = f" | Victory in {foods_to_victory}"
-            self.label.config(text=base_text + short_progress)
+            self.label.config(text=base_text_with_time + short_progress)
         else:
-            self.label.config(text=base_text + progress_text)
+            self.label.config(text=base_text_with_time + progress_text)
     
     def calculate_food_points(self):
         """Calculate points for regular food with bonuses"""
@@ -650,12 +698,13 @@ class SnakeGame:
             text="SNAKE MASTER ACHIEVED!\nYou conquered all 5 stages!"
         )
         
-        # Score display
+        # Score display with timestamp
+        final_time = self.get_elapsed_time()
         score_display = self.canvas.create_text(
             GAME_WIDTH // 2, GAME_HEIGHT // 2 + 30,
             font=('Arial', 16, 'bold'),
             fill="#FFFF00",
-            text=f"Final Score: {self.score} points\nFoods Eaten: {self.total_foods_eaten}"
+            text=f"Final Score: {self.score} points\nFoods Eaten: {self.total_foods_eaten}\nSession Time: {final_time}\nStarted at: {self.session_start}"
         )
         
         # Restart instruction
@@ -702,6 +751,8 @@ class SnakeGame:
                 self.reset()
                 # Restart the game loop
                 self.running = True
+                # Restart timestamp updates
+                self.update_timestamp_display()
                 self.next_move()
             except Exception as e:
                 print(f"Error restarting game: {e}")
