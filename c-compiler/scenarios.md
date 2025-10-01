@@ -91,3 +91,17 @@
 - Global variables allocated in .data section with initial values
 - Local variables allocated on stack with negative RBP offsets
 - Parameter passing following x86-64 calling convention
+
+# Scenario 6
+
+- Constant Folding (enables other optimizations)
+- Dead Code Elimination (removes unnecessary code)
+- Loop Optimization (optimizes control flow)
+- Peephole Optimization (assembly-level improvements)
+- Multiple passes until no more optimizations possible
+- Comprehensive AST traversal with recursive processing
+- Assembly-level pattern matching and replacement
+- Complete lexical, syntactic, and semantic analysis
+- x86-64 assembly code generation with calling conventions
+- Multi-level optimization system with measurable performance gains
+- Professional command-line interface and error reporting

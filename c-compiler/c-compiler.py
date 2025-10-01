@@ -1772,6 +1772,499 @@ class CodeGenerator:
         return 'rax'
 
 # ============================================================================
+# OPTIMIZATION PASSES
+# ============================================================================
+
+class OptimizationPass:
+    """Base class for optimization passes."""
+    
+    def __init__(self, name: str):
+        self.name = name
+        self.optimizations_applied = 0
+    
+    def optimize(self, node: ASTNode) -> ASTNode:
+        """Apply optimization to AST node. Override in subclasses."""
+        return node
+    
+    def report(self):
+        """Report optimization statistics."""
+        print(f"   {self.name}: {self.optimizations_applied} optimizations applied")
+
+class ConstantFoldingPass(OptimizationPass):
+    """
+    Constant Folding Optimization Pass
+    
+    Evaluates constant expressions at compile time:
+    - 2 + 3 → 5
+    - 10 * 0 → 0  
+    - x + 0 → x
+    - x * 1 → x
+    """
+    
+    def __init__(self):
+        super().__init__("Constant Folding")
+    
+    def optimize(self, node: ASTNode) -> ASTNode:
+        """Apply constant folding to AST."""
+        if isinstance(node, Program):
+            # Optimize all declarations in the program
+            optimized_declarations = []
+            for declaration in node.declarations:
+                optimized_declarations.append(self.fold_constants(declaration))
+            return Program(optimized_declarations)
+        else:
+            return self.fold_constants(node)
+    
+    def fold_constants(self, node: ASTNode) -> ASTNode:
+        """Recursively fold constant expressions."""
+        if isinstance(node, BinaryExpression):
+            return self.fold_binary_expression(node)
+        elif isinstance(node, UnaryExpression):
+            return self.fold_unary_expression(node)
+        elif isinstance(node, FunctionDeclaration):
+            if node.body:
+                node.body = self.fold_constants(node.body)
+        elif isinstance(node, CompoundStatement):
+            node.statements = [self.fold_constants(stmt) for stmt in node.statements]
+        elif isinstance(node, IfStatement):
+            node.condition = self.fold_constants(node.condition)
+            node.then_statement = self.fold_constants(node.then_statement)
+            if node.else_statement:
+                node.else_statement = self.fold_constants(node.else_statement)
+        elif isinstance(node, WhileStatement):
+            node.condition = self.fold_constants(node.condition)
+            node.body = self.fold_constants(node.body)
+        elif isinstance(node, ReturnStatement):
+            if node.expression:
+                node.expression = self.fold_constants(node.expression)
+        elif isinstance(node, VariableDeclaration):
+            if node.initializer:
+                node.initializer = self.fold_constants(node.initializer)
+        elif isinstance(node, ExpressionStatement):
+            if node.expression:
+                node.expression = self.fold_constants(node.expression)
+        elif isinstance(node, AssignmentExpression):
+            node.right = self.fold_constants(node.right)
+        elif isinstance(node, CallExpression):
+            node.arguments = [self.fold_constants(arg) for arg in node.arguments]
+        
+        return node
+    
+    def fold_binary_expression(self, node: BinaryExpression) -> ASTNode:
+        """Fold binary expressions with constant operands."""
+        # Recursively fold operands first
+        left = self.fold_constants(node.left)
+        right = self.fold_constants(node.right)
+        
+        # Check if both operands are integer literals
+        if isinstance(left, IntegerLiteral) and isinstance(right, IntegerLiteral):
+            result = self.evaluate_binary_operation(left.value, node.operator, right.value)
+            if result is not None:
+                self.optimizations_applied += 1
+                return IntegerLiteral(result)
+        
+        # Algebraic simplifications
+        optimized = self.apply_algebraic_simplifications(left, node.operator, right)
+        if optimized:
+            return optimized
+        
+        # Return updated expression
+        return BinaryExpression(left, node.operator, right)
+    
+    def evaluate_binary_operation(self, left_val: int, operator: str, right_val: int) -> Optional[int]:
+        """Evaluate binary operation on constant values."""
+        try:
+            if operator == '+':
+                return left_val + right_val
+            elif operator == '-':
+                return left_val - right_val
+            elif operator == '*':
+                return left_val * right_val
+            elif operator == '/':
+                return left_val // right_val if right_val != 0 else None
+            elif operator == '%':
+                return left_val % right_val if right_val != 0 else None
+            elif operator == '<':
+                return 1 if left_val < right_val else 0
+            elif operator == '>':
+                return 1 if left_val > right_val else 0
+            elif operator == '<=':
+                return 1 if left_val <= right_val else 0
+            elif operator == '>=':
+                return 1 if left_val >= right_val else 0
+            elif operator == '==':
+                return 1 if left_val == right_val else 0
+            elif operator == '!=':
+                return 1 if left_val != right_val else 0
+            elif operator == '&&':
+                return 1 if left_val and right_val else 0
+            elif operator == '||':
+                return 1 if left_val or right_val else 0
+        except (ZeroDivisionError, ValueError):
+            return None
+        return None
+    
+    def apply_algebraic_simplifications(self, left: ASTNode, operator: str, right: ASTNode) -> Optional[ASTNode]:
+        """Apply algebraic simplification rules."""
+        # x + 0 → x
+        if operator == '+':
+            if isinstance(right, IntegerLiteral) and right.value == 0:
+                self.optimizations_applied += 1
+                return left
+            if isinstance(left, IntegerLiteral) and left.value == 0:
+                self.optimizations_applied += 1
+                return right
+        
+        # x - 0 → x
+        elif operator == '-':
+            if isinstance(right, IntegerLiteral) and right.value == 0:
+                self.optimizations_applied += 1
+                return left
+        
+        # x * 1 → x, x * 0 → 0
+        elif operator == '*':
+            if isinstance(right, IntegerLiteral):
+                if right.value == 1:
+                    self.optimizations_applied += 1
+                    return left
+                elif right.value == 0:
+                    self.optimizations_applied += 1
+                    return IntegerLiteral(0)
+            if isinstance(left, IntegerLiteral):
+                if left.value == 1:
+                    self.optimizations_applied += 1
+                    return right
+                elif left.value == 0:
+                    self.optimizations_applied += 1
+                    return IntegerLiteral(0)
+        
+        # x / 1 → x
+        elif operator == '/':
+            if isinstance(right, IntegerLiteral) and right.value == 1:
+                self.optimizations_applied += 1
+                return left
+        
+        return None
+    
+    def fold_unary_expression(self, node: UnaryExpression) -> ASTNode:
+        """Fold unary expressions with constant operands."""
+        operand = self.fold_constants(node.operand)
+        
+        if isinstance(operand, IntegerLiteral):
+            if node.operator == '-':
+                self.optimizations_applied += 1
+                return IntegerLiteral(-operand.value)
+            elif node.operator == '!':
+                self.optimizations_applied += 1
+                return IntegerLiteral(1 if operand.value == 0 else 0)
+        
+        return UnaryExpression(node.operator, operand)
+
+class DeadCodeEliminationPass(OptimizationPass):
+    """
+    Dead Code Elimination Optimization Pass
+    
+    Removes unreachable and unused code:
+    - Statements after return statements
+    - If statements with constant false conditions
+    - Unused variable declarations
+    """
+    
+    def __init__(self):
+        super().__init__("Dead Code Elimination")
+    
+    def optimize(self, node: ASTNode) -> ASTNode:
+        """Apply dead code elimination to AST."""
+        if isinstance(node, Program):
+            optimized_declarations = []
+            for declaration in node.declarations:
+                optimized_declarations.append(self.eliminate_dead_code(declaration))
+            return Program(optimized_declarations)
+        else:
+            return self.eliminate_dead_code(node)
+    
+    def eliminate_dead_code(self, node: ASTNode) -> ASTNode:
+        """Recursively eliminate dead code."""
+        if isinstance(node, CompoundStatement):
+            return self.eliminate_dead_statements(node)
+        elif isinstance(node, IfStatement):
+            return self.eliminate_dead_if(node)
+        elif isinstance(node, FunctionDeclaration):
+            if node.body:
+                node.body = self.eliminate_dead_code(node.body)
+        elif isinstance(node, WhileStatement):
+            node.condition = self.eliminate_dead_code(node.condition)
+            node.body = self.eliminate_dead_code(node.body)
+        
+        return node
+    
+    def eliminate_dead_statements(self, node: CompoundStatement) -> CompoundStatement:
+        """Remove statements after return statements."""
+        new_statements = []
+        found_return = False
+        
+        for stmt in node.statements:
+            if found_return:
+                # This statement is unreachable
+                self.optimizations_applied += 1
+                continue
+            
+            # Recursively process statement
+            processed_stmt = self.eliminate_dead_code(stmt)
+            new_statements.append(processed_stmt)
+            
+            # Check if this statement is a return
+            if isinstance(processed_stmt, ReturnStatement):
+                found_return = True
+        
+        return CompoundStatement(new_statements)
+    
+    def eliminate_dead_if(self, node: IfStatement) -> ASTNode:
+        """Eliminate if statements with constant conditions."""
+        # Process condition
+        condition = self.eliminate_dead_code(node.condition)
+        
+        # Check if condition is a constant
+        if isinstance(condition, IntegerLiteral):
+            self.optimizations_applied += 1
+            if condition.value != 0:  # True condition
+                return self.eliminate_dead_code(node.then_statement)
+            else:  # False condition
+                if node.else_statement:
+                    return self.eliminate_dead_code(node.else_statement)
+                else:
+                    # Return empty statement or null
+                    return CompoundStatement([])
+        
+        # Process branches
+        then_stmt = self.eliminate_dead_code(node.then_statement)
+        else_stmt = None
+        if node.else_statement:
+            else_stmt = self.eliminate_dead_code(node.else_statement)
+        
+        return IfStatement(condition, then_stmt, else_stmt)
+
+class LoopOptimizationPass(OptimizationPass):
+    """
+    Loop Optimization Pass
+    
+    Optimizes loop constructs:
+    - Eliminate loops with constant false conditions
+    - Optimize simple counting loops
+    """
+    
+    def __init__(self):
+        super().__init__("Loop Optimization")
+    
+    def optimize(self, node: ASTNode) -> ASTNode:
+        """Apply loop optimizations to AST."""
+        if isinstance(node, Program):
+            optimized_declarations = []
+            for declaration in node.declarations:
+                optimized_declarations.append(self.optimize_loops(declaration))
+            return Program(optimized_declarations)
+        else:
+            return self.optimize_loops(node)
+    
+    def optimize_loops(self, node: ASTNode) -> ASTNode:
+        """Recursively optimize loops."""
+        if isinstance(node, WhileStatement):
+            return self.optimize_while_loop(node)
+        elif isinstance(node, ForStatement):
+            return self.optimize_for_loop(node)
+        elif isinstance(node, CompoundStatement):
+            node.statements = [self.optimize_loops(stmt) for stmt in node.statements]
+        elif isinstance(node, IfStatement):
+            node.then_statement = self.optimize_loops(node.then_statement)
+            if node.else_statement:
+                node.else_statement = self.optimize_loops(node.else_statement)
+        elif isinstance(node, FunctionDeclaration):
+            if node.body:
+                node.body = self.optimize_loops(node.body)
+        
+        return node
+    
+    def optimize_while_loop(self, node: WhileStatement) -> ASTNode:
+        """Optimize while loops."""
+        # Check for constant false condition
+        if isinstance(node.condition, IntegerLiteral) and node.condition.value == 0:
+            self.optimizations_applied += 1
+            return CompoundStatement([])  # Remove the loop entirely
+        
+        # Recursively optimize loop body
+        node.body = self.optimize_loops(node.body)
+        return node
+    
+    def optimize_for_loop(self, node: ForStatement) -> ASTNode:
+        """Optimize for loops."""
+        # Check for constant false condition
+        if isinstance(node.condition, IntegerLiteral) and node.condition.value == 0:
+            self.optimizations_applied += 1
+            return CompoundStatement([])  # Remove the loop entirely
+        
+        # Recursively optimize loop body
+        node.body = self.optimize_loops(node.body)
+        return node
+
+class PeepholeOptimizerPass(OptimizationPass):
+    """
+    Peephole Optimization Pass
+    
+    Performs assembly-level optimizations on generated code:
+    - Remove redundant move instructions
+    - Combine adjacent operations
+    - Optimize register usage patterns
+    """
+    
+    def __init__(self):
+        super().__init__("Peephole Optimization")
+        self.assembly_lines = []
+    
+    def optimize_assembly(self, assembly_code: str) -> str:
+        """Apply peephole optimizations to assembly code."""
+        lines = assembly_code.split('\n')
+        self.assembly_lines = []
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Skip empty lines and labels
+            if not line or line.endswith(':') or line.startswith('.'):
+                self.assembly_lines.append(lines[i])
+                i += 1
+                continue
+            
+            # Look for optimization patterns
+            optimized = False
+            
+            # Pattern 1: Remove redundant moves (movq %rax, %rax)
+            if self.is_redundant_move(line):
+                self.optimizations_applied += 1
+                optimized = True
+            
+            # Pattern 2: Combine move and operation
+            elif i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                combined = self.combine_move_operation(line, next_line)
+                if combined:
+                    self.assembly_lines.append(combined)
+                    self.optimizations_applied += 1
+                    i += 2  # Skip both lines
+                    optimized = True
+            
+            # Pattern 3: Remove unnecessary zero operations
+            elif self.is_zero_operation(line):
+                self.optimizations_applied += 1
+                optimized = True
+            
+            if not optimized:
+                self.assembly_lines.append(lines[i])
+            
+            i += 1
+        
+        return '\n'.join(self.assembly_lines)
+    
+    def is_redundant_move(self, line: str) -> bool:
+        """Check if line is a redundant move instruction."""
+        if 'movq' in line:
+            parts = line.split()
+            if len(parts) >= 3:
+                src = parts[1].rstrip(',')
+                dst = parts[2].split('#')[0].strip()
+                return src == dst
+        return False
+    
+    def combine_move_operation(self, line1: str, line2: str) -> Optional[str]:
+        """Try to combine move and arithmetic operation."""
+        # Pattern: movq $const, %reg followed by addq %reg, %other
+        if 'movq $' in line1 and 'addq' in line2:
+            # Extract constant from first line
+            parts1 = line1.split()
+            if len(parts1) >= 3:
+                const = parts1[1].rstrip(',')
+                reg = parts1[2].split('#')[0].strip()
+                
+                # Check if second line uses this register
+                parts2 = line2.split()
+                if len(parts2) >= 3 and parts2[1].rstrip(',') == reg:
+                    target = parts2[2].split('#')[0].strip()
+                    # Combine into: addq $const, target
+                    return f"    addq {const}, {target}                # combined add immediate"
+        
+        return None
+    
+    def is_zero_operation(self, line: str) -> bool:
+        """Check for operations that have no effect."""
+        # addq $0, %reg or subq $0, %reg
+        return ('addq $0,' in line.replace(' ', '') or 
+                'subq $0,' in line.replace(' ', '') or
+                'imulq $1,' in line.replace(' ', ''))
+
+class OptimizationManager:
+    """
+    Manages and orchestrates multiple optimization passes.
+    
+    Applies optimizations in the correct order:
+    1. Constant Folding (enables other optimizations)
+    2. Dead Code Elimination (removes unnecessary code)
+    3. Loop Optimization (optimizes control flow)
+    4. Peephole Optimization (assembly-level optimizations)
+    """
+    
+    def __init__(self):
+        self.passes = [
+            ConstantFoldingPass(),
+            DeadCodeEliminationPass(),
+            LoopOptimizationPass(),
+            PeepholeOptimizerPass()
+        ]
+        self.total_optimizations = 0
+    
+    def optimize_ast(self, ast: Program) -> Program:
+        """Apply AST-level optimizations."""
+        print("🔧 Applying AST-level optimizations...")
+        
+        optimized_ast = ast
+        
+        # Apply multiple passes until no more optimizations
+        for pass_num in range(3):  # Maximum 3 iterations
+            initial_count = sum(p.optimizations_applied for p in self.passes[:3])
+            
+            for opt_pass in self.passes[:3]:  # Skip peephole pass for AST
+                optimized_ast = opt_pass.optimize(optimized_ast)
+            
+            final_count = sum(p.optimizations_applied for p in self.passes[:3])
+            
+            if final_count == initial_count:
+                break  # No more optimizations possible
+        
+        # Report results
+        for opt_pass in self.passes[:3]:
+            opt_pass.report()
+        
+        self.total_optimizations = sum(p.optimizations_applied for p in self.passes[:3])
+        print(f"   Total AST optimizations: {self.total_optimizations}")
+        
+        return optimized_ast
+    
+    def optimize_assembly(self, assembly_code: str) -> str:
+        """Apply assembly-level optimizations."""
+        print("🔧 Applying assembly-level optimizations...")
+        
+        # Apply peephole optimizations
+        peephole_pass = self.passes[3]  # PeepholeOptimizerPass
+        optimized_assembly = peephole_pass.optimize_assembly(assembly_code)
+        
+        peephole_pass.report()
+        assembly_optimizations = peephole_pass.optimizations_applied
+        
+        print(f"   Total assembly optimizations: {assembly_optimizations}")
+        print(f"   Overall optimizations applied: {self.total_optimizations + assembly_optimizations}")
+        
+        return optimized_assembly
+
+# ============================================================================
 # LEXICAL ANALYZER (TOKENIZER)
 # ============================================================================
 
@@ -2024,6 +2517,12 @@ class CCompiler:
         self.parser = None
         self.semantic_analyzer = None
         self.code_generator = None
+        self.optimizer = OptimizationManager()
+        self.optimization_level = 1  # Default optimization level
+    
+    def set_optimization_level(self, level: int):
+        """Set optimization level (0=none, 1=basic, 2=aggressive)."""
+        self.optimization_level = level
     
     def _format_ast_node(self, node: ASTNode, max_length: int = 80) -> str:
         """Format AST node for readable debugging output."""
@@ -2090,18 +2589,36 @@ class CCompiler:
             
             print("   ✅ Semantic analysis completed successfully!")
             
+            # Phase 3.5: AST Optimization  
+            if self.optimization_level > 0:
+                print("🔧 Phase 3.5: AST Optimization...")
+                optimized_ast = self.optimizer.optimize_ast(ast)
+                print("   ✅ AST optimization completed successfully!")
+            else:
+                print("⏩ Phase 3.5: AST Optimization - SKIPPED (O0)")
+                optimized_ast = ast
+            
             # Phase 4: Code Generation
             print("⚙️ Phase 4: Code Generation...")
             self.code_generator = CodeGenerator()
-            assembly_code = self.code_generator.generate(ast)
+            assembly_code = self.code_generator.generate(optimized_ast)
             
-            # Write assembly to output file
+            # Phase 4.5: Assembly Optimization
+            if self.optimization_level > 0:
+                print("🔧 Phase 4.5: Assembly Optimization...")
+                optimized_assembly = self.optimizer.optimize_assembly(assembly_code)
+                print("   ✅ Assembly optimization completed successfully!")
+            else:
+                print("⏩ Phase 4.5: Assembly Optimization - SKIPPED (O0)")
+                optimized_assembly = assembly_code
+            
+            # Write optimized assembly to output file
             output_filename = source_file.replace('.c', '.s')
             with open(output_filename, 'w') as f:
-                f.write(assembly_code)
+                f.write(optimized_assembly)
             
-            print(f"   ✅ Generated assembly code: {output_filename}")
-            print(f"   Generated {len(assembly_code.split())} lines of x86-64 assembly")
+            print(f"   ✅ Generated optimized assembly: {output_filename}")
+            print(f"   Generated {len(optimized_assembly.split())} lines of x86-64 assembly")
             
             # TODO: Phase 5: Assembly & Linking
             print("🔗 Phase 5: Assembly & Linking - TODO")
@@ -2185,6 +2702,12 @@ def main():
                        help='Compile to object file only (.o)')
     parser.add_argument('--executable', action='store_true',
                        help='Compile to executable binary (requires GNU binutils)')
+    parser.add_argument('-O0', '--no-optimize', action='store_true',
+                       help='Disable all optimizations')
+    parser.add_argument('-O1', '--optimize', action='store_true',
+                       help='Enable basic optimizations (default)')
+    parser.add_argument('-O2', '--optimize-more', action='store_true',
+                       help='Enable aggressive optimizations')
     
     if len(sys.argv) == 1:
         parser.print_help()
@@ -2202,6 +2725,15 @@ def main():
         sys.exit(1)
     
     compiler = CCompiler()
+    
+    # Set optimization level
+    if args.no_optimize:
+        compiler.set_optimization_level(0)
+    elif args.optimize_more:
+        compiler.set_optimization_level(2)
+    elif args.optimize:
+        compiler.set_optimization_level(1)
+    # Default is already 1
     
     if args.executable:
         # Compile to executable
