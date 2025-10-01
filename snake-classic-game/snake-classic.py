@@ -102,11 +102,29 @@ class SoundSystem:
             
             sample_rate = 22050
             
-            # Generate sound effects
-            sounds = {
-                'eat': (440, 0.1),      # Short beep
-                'bonus': (660, 0.2),    # Higher, longer beep
-                'stage_up': (880, 0.3), # Even higher
+            # Generate enhanced sound effects
+            # Multi-layered eating sound (crunch effect)
+            eat_layers = [(440, 0.08), (550, 0.04), (330, 0.03)]
+            self.generate_realistic_eat_sound('eat', eat_layers, sample_rate)
+            
+            # Rich bonus food sound (sparkle effect)  
+            bonus_layers = [(660, 0.15), (880, 0.1), (1100, 0.08), (440, 0.05)]
+            self.generate_realistic_bonus_sound('bonus', bonus_layers, sample_rate)
+            
+            # Stage-specific progression sounds
+            stage_progressions = {
+                'stage_up_1': [(523, 0.2), (659, 0.2), (784, 0.3)],  # C-E-G space theme
+                'stage_up_2': [(349, 0.2), (440, 0.2), (523, 0.3)],  # F-A-C ocean theme  
+                'stage_up_3': [(392, 0.2), (494, 0.2), (587, 0.3)],  # G-B-D crystal theme
+                'stage_up_4': [(294, 0.2), (370, 0.2), (440, 0.3)],  # D-F#-A forest theme
+                'stage_up_5': [(330, 0.2), (415, 0.2), (494, 0.3)]   # E-G#-B desert theme
+            }
+            
+            for stage_sound, chord_progression in stage_progressions.items():
+                self.generate_stage_progression_sound(stage_sound, chord_progression, sample_rate)
+            
+            # Simple sounds for game states
+            simple_sounds = {
                 'game_over': (220, 0.5), # Low, longer
                 'victory': (523, 0.4)   # Victory tone
             }
@@ -114,7 +132,7 @@ class SoundSystem:
             # Generate background music for each stage
             self.generate_background_music(sample_rate)
             
-            for sound_name, (frequency, duration) in sounds.items():
+            for sound_name, (frequency, duration) in simple_sounds.items():
                 frames = int(sample_rate * duration)
                 raw_data = b''
                 
@@ -152,76 +170,380 @@ class SoundSystem:
                 self.sound_data[sound_name] = None
     
     def generate_background_music(self, sample_rate):
-        """Generate looping background music for each stage"""
+        """Generate realistic and immersive background music for each stage"""
         try:
             import struct
             import math
+            import random
             
-            # Background music themes for each stage
-            stage_themes = {
-                1: {'name': 'Space Ambient', 'base_freq': 220, 'harmonics': [1.0, 1.5, 2.0], 'tempo': 0.8},
-                2: {'name': 'Ocean Waves', 'base_freq': 165, 'harmonics': [1.0, 1.2, 1.8], 'tempo': 0.6},
-                3: {'name': 'Crystal Cave', 'base_freq': 330, 'harmonics': [1.0, 1.33, 2.5], 'tempo': 0.7},
-                4: {'name': 'Forest Nature', 'base_freq': 196, 'harmonics': [1.0, 1.25, 1.67], 'tempo': 0.9},
-                5: {'name': 'Desert Wind', 'base_freq': 147, 'harmonics': [1.0, 1.4, 2.2], 'tempo': 0.5}
-            }
-            
-            # Generate 8-second loops for each stage
-            duration = 8.0
+            duration = 16.0  # Longer 16-second loops for musical development
             frames = int(sample_rate * duration)
             
-            for stage, theme in stage_themes.items():
+            # Enhanced stage themes with realistic musical elements
+            stage_themes = {
+                1: {
+                    'name': 'Ethereal Space Ambience',
+                    'chord_progression': [(220, 277, 330), (196, 247, 294), (220, 277, 330), (246, 311, 370)],  # Am, Gm, Am, Bm
+                    'bass_line': [110, 98, 110, 123],  # Bass notes
+                    'atmosphere': 'cosmic'
+                },
+                2: {
+                    'name': 'Oceanic Depths',
+                    'chord_progression': [(174, 220, 261), (146, 185, 220), (196, 247, 294), (174, 220, 261)],  # Fm, Dm, Gm, Fm
+                    'bass_line': [87, 73, 98, 87],
+                    'atmosphere': 'flowing'
+                },
+                3: {
+                    'name': 'Mystical Crystal Resonance',
+                    'chord_progression': [(196, 247, 294), (220, 277, 330), (261, 330, 392), (233, 294, 349)],  # Gm, Am, Cm, Bbm
+                    'bass_line': [98, 110, 131, 117],
+                    'atmosphere': 'crystalline'
+                },
+                4: {
+                    'name': 'Ancient Forest Symphony',
+                    'chord_progression': [(146, 185, 220), (164, 207, 246), (196, 247, 294), (174, 220, 261)],  # Dm, Em, Gm, Fm
+                    'bass_line': [73, 82, 98, 87],
+                    'atmosphere': 'organic'
+                },
+                5: {
+                    'name': 'Haunting Desert Winds',
+                    'chord_progression': [(164, 207, 246), (138, 174, 207), (155, 196, 233), (164, 207, 246)],  # Em, C#m, Ebm, Em
+                    'bass_line': [82, 69, 78, 82],
+                    'atmosphere': 'mysterious'
+                }
+            }
+            
+            for stage in range(1, 6):
+                theme = stage_themes[stage]
                 raw_data = b''
-                base_freq = theme['base_freq']
-                harmonics = theme['harmonics']
-                tempo = theme['tempo']
+                
+                chord_duration = duration / 4  # 4 chords per loop
                 
                 for i in range(frames):
                     time_val = float(i) / sample_rate
                     
-                    # Create ambient drone with harmonics
-                    wave_val = 0
-                    for j, harmonic in enumerate(harmonics):
-                        freq = base_freq * harmonic
-                        amplitude = 0.3 / (j + 1)  # Decreasing amplitude for harmonics
+                    # Determine current chord (4 chords cycle)
+                    chord_index = int(time_val / chord_duration) % 4
+                    chord = theme['chord_progression'][chord_index]
+                    bass_note = theme['bass_line'][chord_index]
+                    
+                    # Progress within current chord
+                    chord_progress = (time_val % chord_duration) / chord_duration
+                    
+                    # === BASS LAYER ===
+                    bass_wave = math.sin(2 * math.pi * bass_note * time_val) * 0.4
+                    bass_wave *= (1 - chord_progress * 0.2)  # Slight fade within chord
+                    
+                    # === CHORD LAYER ===
+                    chord_amplitude = 0.25
+                    chord_sample = 0
+                    for note_freq in chord:
+                        # Add subtle detuning for chorus effect
+                        detune1 = note_freq * (1 + 0.003 * math.sin(time_val * 0.7))
+                        detune2 = note_freq * (1 - 0.003 * math.sin(time_val * 0.9))
                         
-                        # Add some variation based on stage theme
-                        if stage == 1:  # Space - slow oscillation
-                            freq += 5 * math.sin(time_val * 0.5)
-                        elif stage == 2:  # Ocean - wave-like modulation
-                            freq += 3 * math.sin(time_val * 0.3) + 2 * math.sin(time_val * 0.7)
-                        elif stage == 3:  # Cave - crystal-like shimmer
-                            freq += 8 * math.sin(time_val * 1.2) * math.sin(time_val * 0.1)
-                        elif stage == 4:  # Forest - natural rhythm
-                            freq += 4 * math.sin(time_val * 0.4) + 2 * math.sin(time_val * 0.8)
-                        elif stage == 5:  # Desert - wind-like variation
-                            freq += 6 * math.sin(time_val * 0.2) * (1 + 0.5 * math.sin(time_val * 2.0))
+                        wave1 = math.sin(2 * math.pi * detune1 * time_val) * chord_amplitude
+                        wave2 = math.sin(2 * math.pi * detune2 * time_val) * chord_amplitude
                         
-                        wave_val += amplitude * math.sin(freq * 2 * math.pi * time_val)
+                        # Smooth attack and release within chord
+                        envelope = math.sin(chord_progress * math.pi) * 0.8 + 0.2
+                        
+                        chord_sample += (wave1 + wave2) * envelope * 0.5
                     
-                    # Add tempo-based pulse
-                    pulse = 0.1 * math.sin(time_val * tempo * 2 * math.pi) + 0.9
-                    wave_val *= pulse
+                    # === ATMOSPHERE LAYER ===
+                    atmosphere_sample = 0
+                    if theme['atmosphere'] == 'cosmic':
+                        # Sweeping pads with slow filter
+                        pad_freq = 110 + 30 * math.sin(time_val * 0.1)
+                        atmosphere_sample = math.sin(2 * math.pi * pad_freq * time_val) * 0.15
+                        atmosphere_sample *= (1 + math.sin(time_val * 0.05)) * 0.5
+                        
+                        # Occasional sparkles
+                        if i % 8820 == 0:  # About every 0.4 seconds at 22050Hz
+                            sparkle_time = (time_val % 0.4) * 10
+                            if sparkle_time < 1:
+                                sparkle = math.sin(2 * math.pi * 1760 * time_val) * 0.08
+                                atmosphere_sample += sparkle * math.exp(-sparkle_time * 5)
+                        
+                    elif theme['atmosphere'] == 'flowing':
+                        # Wave-like motion
+                        wave_freq = 65 + 15 * math.sin(time_val * 0.2)
+                        atmosphere_sample = math.sin(2 * math.pi * wave_freq * time_val) * 0.2
+                        atmosphere_sample *= (1 + math.sin(time_val * 0.08)) * 0.6
+                        
+                        # Bubbling effects
+                        if i % 11025 == 0:  # About every 0.5 seconds
+                            bubble_time = (time_val % 0.5) * 8
+                            if bubble_time < 1:
+                                bubble = math.sin(2 * math.pi * (300 + 200 * (i % 7)) * time_val) * 0.06
+                                atmosphere_sample += bubble * math.exp(-bubble_time * 8)
                     
-                    # Gentle overall envelope
-                    envelope = 0.7 + 0.3 * math.sin(time_val * 0.125 * 2 * math.pi)
-                    wave_val *= envelope
+                    elif theme['atmosphere'] == 'crystalline':
+                        # High frequency shimmer
+                        shimmer_freq = 1760 + 440 * math.sin(time_val * 0.3)
+                        atmosphere_sample = math.sin(2 * math.pi * shimmer_freq * time_val) * 0.08
+                        atmosphere_sample *= (1 + math.sin(time_val * 0.12)) * 0.4
+                        
+                        # Crystal chimes
+                        if i % 22050 == 0:  # About every 1 second
+                            chime_time = (time_val % 1.0) * 3
+                            if chime_time < 1:
+                                chime_freq = 523 + (i % 5) * 131  # C5 to E6 pattern
+                                chime = math.sin(2 * math.pi * chime_freq * time_val) * 0.12
+                                atmosphere_sample += chime * math.exp(-chime_time * 3)
                     
-                    # Scale and convert to 16-bit
-                    sample = int(wave_val * 8192 * self.volume * 0.3)  # Quieter background
-                    raw_data += struct.pack('<hh', sample, sample)
+                    elif theme['atmosphere'] == 'organic':
+                        # Natural evolving textures
+                        texture_freq = 55 + 20 * math.sin(time_val * 0.07) * math.cos(time_val * 0.11)
+                        atmosphere_sample = math.sin(2 * math.pi * texture_freq * time_val) * 0.18
+                        atmosphere_sample *= (1 + math.sin(time_val * 0.03) * math.cos(time_val * 0.05)) * 0.5
+                        
+                        # Bird-like sounds
+                        if i % 33075 == 0:  # About every 1.5 seconds
+                            bird_time = (time_val % 1.5) * 2
+                            if bird_time < 1:
+                                bird_freq = 800 + (i % 3) * 400
+                                bird_mod = 1 + 0.1 * math.sin(time_val * 50)
+                                bird = math.sin(2 * math.pi * bird_freq * bird_mod * time_val) * 0.1
+                                atmosphere_sample += bird * math.exp(-bird_time * 4)
+                    
+                    else:  # mysterious (desert)
+                        # Wind-like sweeps
+                        wind_freq = 40 + 35 * math.sin(time_val * 0.05) * math.sin(time_val * 0.13)
+                        atmosphere_sample = math.sin(2 * math.pi * wind_freq * time_val) * 0.12
+                        atmosphere_sample *= (1 + math.sin(time_val * 0.02)) * 0.7
+                        
+                        # Distant echoes
+                        if i % 44100 == 0:  # About every 2 seconds
+                            echo_time = (time_val % 2.0) * 1.5
+                            if echo_time < 1:
+                                echo_freq = 330 + (i % 4) * 55
+                                echo = math.sin(2 * math.pi * echo_freq * time_val) * 0.08
+                                atmosphere_sample += echo * math.exp(-echo_time * 2)
+                    
+                    # === COMBINE ALL LAYERS ===
+                    final_sample = bass_wave + chord_sample + atmosphere_sample
+                    
+                    # Master envelope for smooth looping
+                    loop_envelope = 1.0
+                    if time_val < 0.5:  # Fade in
+                        loop_envelope = time_val * 2.0
+                    elif time_val > duration - 0.5:  # Fade out
+                        loop_envelope = (duration - time_val) * 2.0
+                    
+                    final_sample *= loop_envelope
+                    
+                    # Gentle compression and limiting
+                    final_sample = max(-0.7, min(0.7, final_sample))
+                    
+                    # Convert to 16-bit stereo
+                    sample_16bit = int(final_sample * 20000)  # Reasonable volume
+                    raw_data += struct.pack('<hh', sample_16bit, sample_16bit)
                 
                 # Create pygame sound from raw data
                 try:
                     bg_sound = pygame.mixer.Sound(buffer=raw_data)
                     self.sound_data[f'bg_stage_{stage}'] = bg_sound
-                    print(f"Generated background music: {theme['name']} (Stage {stage})")
+                    print(f"Generated realistic background music: {theme['name']} (Stage {stage})")
                 except Exception as e:
                     print(f"Error creating background music for stage {stage}: {e}")
                     self.sound_data[f'bg_stage_{stage}'] = None
                     
         except Exception as e:
-            print(f"Error generating background music: {e}")
+            print(f"Error generating realistic background music: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def generate_realistic_eat_sound(self, sound_name, freq_duration_list, sample_rate):
+        """Generate realistic multi-layered eating sound with crunch effect"""
+        try:
+            import struct
+            import math
+            import random
+            
+            total_duration = sum([dur for _, dur in freq_duration_list]) + 0.05
+            frames = int(sample_rate * total_duration)
+            raw_data = b''
+            
+            for i in range(frames):
+                time_val = float(i) / sample_rate
+                sample = 0
+                
+                # Layer multiple frequency components for crunch effect
+                current_time = 0
+                for freq, duration in freq_duration_list:
+                    if current_time <= time_val <= current_time + duration:
+                        # Main tone
+                        wave = math.sin(2 * math.pi * freq * time_val)
+                        
+                        # Add noise for crunch texture
+                        noise = (random.random() - 0.5) * 0.3
+                        
+                        # Add harmonic for richness
+                        harmonic = math.sin(2 * math.pi * freq * 1.5 * time_val) * 0.3
+                        
+                        # Envelope within this layer
+                        layer_progress = (time_val - current_time) / duration
+                        envelope = math.sin(layer_progress * math.pi) * 0.8 + 0.2
+                        
+                        sample += (wave + noise + harmonic) * envelope * 0.4
+                    
+                    current_time += duration
+                
+                # Quick attack, fast decay for crunch feel
+                overall_envelope = 1.0
+                if time_val < 0.01:  # Quick attack
+                    overall_envelope = time_val * 100
+                elif time_val > total_duration - 0.05:  # Fast decay
+                    overall_envelope = (total_duration - time_val) * 20
+                
+                sample *= overall_envelope
+                sample = max(-0.8, min(0.8, sample))  # Limiting
+                
+                sample_16bit = int(sample * 20000)
+                raw_data += struct.pack('<hh', sample_16bit, sample_16bit)
+            
+            sound = pygame.mixer.Sound(buffer=raw_data)
+            self.sound_data[sound_name] = sound
+            print(f"Generated realistic eating sound with crunch effect")
+            
+        except Exception as e:
+            print(f"Error generating realistic eat sound: {e}")
+            # Fallback to simple tone
+            self.generate_tone_sound(sound_name, 440, 0.1, sample_rate)
+    
+    def generate_realistic_bonus_sound(self, sound_name, freq_duration_list, sample_rate):
+        """Generate rich bonus food collection sound with sparkle effect"""
+        try:
+            import struct
+            import math
+            import random
+            
+            total_duration = sum([dur for _, dur in freq_duration_list]) + 0.1
+            frames = int(sample_rate * total_duration)
+            raw_data = b''
+            
+            for i in range(frames):
+                time_val = float(i) / sample_rate
+                sample = 0
+                
+                # Layer ascending frequencies for magical effect
+                current_time = 0
+                for j, (freq, duration) in enumerate(freq_duration_list):
+                    if current_time <= time_val <= current_time + duration:
+                        # Main tone with slight vibrato
+                        vibrato = freq * (1 + 0.02 * math.sin(time_val * 8))
+                        wave = math.sin(2 * math.pi * vibrato * time_val)
+                        
+                        # Add sparkle harmonics
+                        sparkle1 = math.sin(2 * math.pi * freq * 2 * time_val) * 0.4
+                        sparkle2 = math.sin(2 * math.pi * freq * 3 * time_val) * 0.2
+                        
+                        # Layer-specific envelope (ascending brightness)
+                        layer_progress = (time_val - current_time) / duration
+                        envelope = math.sin(layer_progress * math.pi) * (0.6 + j * 0.1)
+                        
+                        sample += (wave + sparkle1 + sparkle2) * envelope * 0.3
+                    
+                    current_time += duration
+                
+                # Add magical shimmer effect
+                if random.random() < 0.1:  # 10% chance for shimmer
+                    shimmer = math.sin(2 * math.pi * 2640 * time_val) * 0.1  # High freq sparkle
+                    sample += shimmer * math.exp(-time_val * 5)
+                
+                # Smooth overall envelope
+                overall_envelope = 1.0
+                if time_val < 0.02:  # Smooth attack
+                    overall_envelope = time_val * 50
+                elif time_val > total_duration - 0.08:  # Gentle decay
+                    overall_envelope = (total_duration - time_val) * 12.5
+                
+                sample *= overall_envelope
+                sample = max(-0.7, min(0.7, sample))  # Limiting
+                
+                sample_16bit = int(sample * 22000)
+                raw_data += struct.pack('<hh', sample_16bit, sample_16bit)
+            
+            sound = pygame.mixer.Sound(buffer=raw_data)
+            self.sound_data[sound_name] = sound
+            print(f"Generated rich bonus food sound with sparkle effects")
+            
+        except Exception as e:
+            print(f"Error generating realistic bonus sound: {e}")
+            # Fallback to simple tone
+            self.generate_tone_sound(sound_name, 660, 0.2, sample_rate)
+    
+    def generate_stage_progression_sound(self, sound_name, freq_duration_list, sample_rate):
+        """Generate stage-specific progression sound matching the stage theme"""
+        try:
+            import struct
+            import math
+            
+            total_duration = sum([dur for _, dur in freq_duration_list]) + 0.2
+            frames = int(sample_rate * total_duration)
+            raw_data = b''
+            
+            # Extract stage number from sound_name (e.g., 'stage_up_1' -> 1)
+            stage_num = int(sound_name.split('_')[-1])
+            
+            for i in range(frames):
+                time_val = float(i) / sample_rate
+                sample = 0
+                
+                # Play chord progression
+                current_time = 0
+                for j, (freq, duration) in enumerate(freq_duration_list):
+                    if current_time <= time_val <= current_time + duration:
+                        # Main chord tone
+                        wave = math.sin(2 * math.pi * freq * time_val)
+                        
+                        # Add stage-specific character
+                        if stage_num == 1:  # Space - ethereal
+                            wave += math.sin(2 * math.pi * freq * 1.5 * time_val) * 0.4  # Perfect fifth
+                            wave += math.sin(2 * math.pi * freq * 0.5 * time_val) * 0.2  # Sub-harmonic
+                        elif stage_num == 2:  # Ocean - flowing
+                            wave += math.sin(2 * math.pi * freq * 1.25 * time_val) * 0.3  # Major third
+                            wave *= (1 + 0.1 * math.sin(time_val * 3))  # Gentle modulation
+                        elif stage_num == 3:  # Crystal - bright
+                            wave += math.sin(2 * math.pi * freq * 2 * time_val) * 0.5  # Octave
+                            wave += math.sin(2 * math.pi * freq * 4 * time_val) * 0.2  # Two octaves
+                        elif stage_num == 4:  # Forest - organic
+                            wave += math.sin(2 * math.pi * freq * 1.33 * time_val) * 0.3  # Fourth
+                            wave *= (1 + 0.05 * math.sin(time_val * 7))  # Natural variation
+                        elif stage_num == 5:  # Desert - mysterious
+                            wave += math.sin(2 * math.pi * freq * 1.414 * time_val) * 0.3  # Tritone
+                            wave *= (1 + 0.08 * math.sin(time_val * 2))  # Slow modulation
+                        
+                        # Note envelope
+                        note_progress = (time_val - current_time) / duration
+                        envelope = 1.0 - note_progress * 0.5  # Slow decay
+                        
+                        sample += wave * envelope * (0.4 - j * 0.05)  # Decreasing volume
+                    
+                    current_time += duration
+                
+                # Overall envelope for smooth progression sound
+                overall_envelope = 1.0
+                if time_val < 0.05:  # Smooth attack
+                    overall_envelope = time_val * 20
+                elif time_val > total_duration - 0.15:  # Extended decay
+                    overall_envelope = (total_duration - time_val) / 0.15
+                
+                sample *= overall_envelope
+                sample = max(-0.6, min(0.6, sample))  # Gentle limiting
+                
+                sample_16bit = int(sample * 18000)
+                raw_data += struct.pack('<hh', sample_16bit, sample_16bit)
+            
+            sound = pygame.mixer.Sound(buffer=raw_data)
+            self.sound_data[sound_name] = sound
+            print(f"Generated stage {stage_num} progression sound with thematic character")
+            
+        except Exception as e:
+            print(f"Error generating stage progression sound: {e}")
+            # Fallback to simple tone
+            self.generate_tone_sound(sound_name, 880, 0.3, sample_rate)
     
     def play(self, sound_name):
         """Play a sound effect"""
@@ -268,6 +590,7 @@ class SoundSystem:
     def play_background_music(self, stage):
         """Start playing background music for a stage"""
         if not self.enabled:
+            print(f"Sound system disabled, cannot play background music for stage {stage}")
             return
         
         try:
@@ -276,18 +599,26 @@ class SoundSystem:
             
             # Start new background music
             bg_name = f'bg_stage_{stage}'
-            if hasattr(self, 'sound_data') and bg_name in self.sound_data:
-                bg_sound = self.sound_data[bg_name]
-                if bg_sound:
-                    bg_sound.set_volume(self.volume * 0.3)  # Background music quieter
-                    bg_sound.play(loops=-1)  # Loop indefinitely
-                    self.current_bg_sound = bg_sound
-                    print(f"Started background music for stage {stage}")
+            print(f"Looking for background music: {bg_name}")
+            
+            if hasattr(self, 'sound_data'):
+                print(f"Available sounds: {list(self.sound_data.keys())}")
+                if bg_name in self.sound_data:
+                    bg_sound = self.sound_data[bg_name]
+                    if bg_sound:
+                        bg_sound.set_volume(self.volume * 0.8)  # Background music much louder
+                        bg_sound.play(loops=-1)  # Loop indefinitely
+                        self.current_bg_sound = bg_sound
+                        print(f"✅ Started background music for stage {stage} at volume {self.volume * 0.8}")
+                    else:
+                        print(f"❌ Background music for stage {stage} is None")
                 else:
-                    print(f"Background music for stage {stage} not available")
+                    print(f"❌ Background music {bg_name} not found in sound_data")
+            else:
+                print("❌ No sound_data attribute found")
             
         except Exception as e:
-            print(f"Error playing background music for stage {stage}: {e}")
+            print(f"❌ Error playing background music for stage {stage}: {e}")
     
     def stop_background_music(self):
         """Stop currently playing background music"""
@@ -298,6 +629,36 @@ class SoundSystem:
                 print("Stopped background music")
         except Exception as e:
             print(f"Error stopping background music: {e}")
+    
+    def increase_volume(self):
+        """Increase overall volume"""
+        self.volume = min(1.0, self.volume + 0.1)
+        if hasattr(self, 'current_bg_sound') and self.current_bg_sound:
+            self.current_bg_sound.set_volume(self.volume * 0.8)
+        print(f"Volume increased to {self.volume:.1f}")
+        
+    def decrease_volume(self):
+        """Decrease overall volume"""
+        self.volume = max(0.0, self.volume - 0.1)
+        if hasattr(self, 'current_bg_sound') and self.current_bg_sound:
+            self.current_bg_sound.set_volume(self.volume * 0.8)
+        print(f"Volume decreased to {self.volume:.1f}")
+        
+    def toggle_sound(self, current_stage=1):
+        """Toggle sound system on/off"""
+        if self.enabled:
+            self.stop_background_music()
+            pygame.mixer.stop()
+            self.enabled = False
+            print("Sound disabled")
+        else:
+            if SOUND_AVAILABLE:
+                self.enabled = True
+                # Restart background music for current stage
+                self.play_background_music(current_stage)
+                print(f"Sound enabled - restarted background music for stage {current_stage}")
+            else:
+                print("Cannot enable sound - pygame not available")
 STAGE_NAMES = {
     1: "Classic Arena",
     2: "Ocean Depths", 
@@ -503,6 +864,17 @@ class SnakeGame:
             pady=5
         )
         self.label.pack(padx=10, pady=(5, 0))
+        
+        # Controls info label
+        self.controls_label = tk.Label(
+            root,
+            text="🎮 Arrow Keys: Move | 🔊 +/-: Volume | 🔇 M: Mute | 🎵 Background Music Playing",
+            font=('Arial', 10),
+            bg='#222222',
+            fg='#CCCCCC',
+            pady=2
+        )
+        self.controls_label.pack(padx=10, pady=(0, 5))
 
         self.canvas = tk.Canvas(
             root, 
@@ -522,13 +894,21 @@ class SnakeGame:
         root.bind('<Right>', lambda event: self.change_direction('right'))
         root.bind('<Up>', lambda event: self.change_direction('up'))
         root.bind('<Down>', lambda event: self.change_direction('down'))
+        
+        # Sound control keys
+        root.bind('<plus>', lambda event: self.sound_system.increase_volume())
+        root.bind('<equal>', lambda event: self.sound_system.increase_volume())  # For + without Shift
+        root.bind('<minus>', lambda event: self.sound_system.decrease_volume())
+        root.bind('<m>', lambda event: self.sound_system.toggle_sound(self.stage))
+        root.bind('<M>', lambda event: self.sound_system.toggle_sound(self.stage))
 
         self.running = True
         
         # Start real-time timestamp updates
         self.update_timestamp_display()
         
-        # Start background music for stage 1
+        # Test and start background music for stage 1
+        print("Game starting - initializing Stage 1 background music")
         self.sound_system.play_background_music(1)
         
         self.next_move()
@@ -710,12 +1090,18 @@ class SnakeGame:
             try:
                 new_stage = min(MAX_STAGE, (self.total_foods_eaten // STAGE_PROGRESSION) + 1)
                 if new_stage != self.stage and new_stage <= MAX_STAGE:
+                    old_stage = self.stage
                     self.stage = new_stage
                     self.current_bg_color = STAGE_BACKGROUNDS.get(self.stage, STAGE_BACKGROUNDS[1])
                     self.canvas.config(bg=self.current_bg_color)
                     self.clear_background_effects()
                     self.create_background_effects()
                     self.show_stage_message()
+                    # Play stage-specific progression sound and change background music
+                    stage_sound_name = f'stage_up_{self.stage}'
+                    self.sound_system.play(stage_sound_name)
+                    print(f"Stage progression: {old_stage} → {self.stage}")
+                    self.sound_system.play_background_music(self.stage)
             except Exception as e:
                 print(f"Error in stage progression: {e}")
                 # Fallback to safe state
@@ -730,6 +1116,9 @@ class SnakeGame:
                 
         # Check collision with bonus food (if it exists)
         elif self.bonus_food and x == self.bonus_food.x and y == self.bonus_food.y:
+            # Play special bonus food sound
+            self.sound_system.play('bonus')
+            
             bonus_points = self.calculate_bonus_food_points()
             self.score += bonus_points
             self.total_foods_eaten += 1

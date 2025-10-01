@@ -1,6 +1,6 @@
 # Scenario 1
 
-Launched simple snake game in pythin
+Launched simple snake game in pyton
 
 # Scenario 2
 
@@ -218,7 +218,7 @@ Audio Quality:
 - Volume normalization
 - Professional audio synthesis techniques
 
-## Background Music System Update
+## Scenario 13
 
 Immersive Stage-Specific Ambient Music:
 
