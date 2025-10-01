@@ -115,7 +115,10 @@ class SnakeGame:
             self.snake.coordinates.pop()
 
         self.draw_snake()
-        self.root.after(SPEED, self.next_move)
+        
+        # Adjust speed based on score
+        current_speed = self.get_current_speed()
+        self.root.after(current_speed, self.next_move)
 
     def change_direction(self, new_direction):
         opposites = {'up':'down', 'down':'up', 'left':'right', 'right':'left'}
@@ -133,6 +136,13 @@ class SnakeGame:
     def check_self_collision(self, head):
         """Check if the snake collides with itself"""
         return head in self.snake.coordinates
+    
+    def get_current_speed(self):
+        """Calculate current game speed based on score"""
+        if self.score > 15:
+            # Speed up the game - lower delay means faster movement
+            return max(50, SPEED - (self.score - 15) * 5)  # Minimum 50ms delay
+        return SPEED
 
     def game_over(self):
         self.running = False
