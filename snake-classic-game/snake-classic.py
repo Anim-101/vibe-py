@@ -7,11 +7,17 @@ GAME_WIDTH = 600
 GAME_HEIGHT = 400
 SPEED = 100  # Milliseconds between moves
 SPACE_SIZE = 20
-SNAKE_HEAD_COLOR = "#00FF00"  # Bright green head
-SNAKE_BODY_COLOR = "#32CD32"  # Lime green body
+# Realistic snake colors with gradients
+SNAKE_HEAD_COLORS = ["#00FF00", "#32FF32", "#00CC00"]  # Gradient green head
+SNAKE_BODY_COLORS = ["#32CD32", "#50E050", "#28A428"]  # Gradient body segments
 SNAKE_TAIL_COLOR = "#228B22"  # Forest green tail
-FOOD_COLOR = "#FF0000"
-BONUS_FOOD_COLOR = "#FFD700"  # Gold color for bonus food
+SNAKE_OUTLINE = "#004400"  # Dark green outline
+
+# Enhanced food colors
+FOOD_GRADIENT = ["#FF0000", "#FF3333", "#CC0000"]  # Red gradient
+FOOD_HIGHLIGHT = "#FFAAAA"  # Light highlight
+BONUS_FOOD_GRADIENT = ["#FFD700", "#FFED4A", "#DAA520"]  # Gold gradient
+BONUS_HIGHLIGHT = "#FFFFCC"  # Light gold highlight
 BONUS_FOOD_SCORE = 10  # Score at which bonus food appears
 
 # Enhanced scoring system
@@ -58,9 +64,15 @@ class Snake:
 class Food:
     def __init__(self, canvas, snake):
         self.canvas = canvas
+        self.elements = []  # Store all visual elements
         self.place_new(snake)
 
     def place_new(self, snake):
+        # Clear existing elements
+        for element in self.elements:
+            self.canvas.delete(element)
+        self.elements = []
+        
         while True:
             x = random.randint(0, (GAME_WIDTH // SPACE_SIZE) - 1) * SPACE_SIZE
             y = random.randint(0, (GAME_HEIGHT // SPACE_SIZE) - 1) * SPACE_SIZE
@@ -68,18 +80,56 @@ class Food:
                 break
         self.x = x
         self.y = y
-        # Enhanced food design with gradient effect
-        self.square = self.canvas.create_oval(
-            x + 3, y + 3, x + SPACE_SIZE - 3, y + SPACE_SIZE - 3,
-            fill=FOOD_COLOR, outline="#FF6666", width=2, tag="food"
+        
+        # Realistic apple design
+        # Apple shadow
+        shadow = self.canvas.create_oval(
+            x + 5, y + 5, x + SPACE_SIZE - 1, y + SPACE_SIZE - 1,
+            fill="#990000", tag="food"
         )
+        # Main apple body
+        apple_body = self.canvas.create_oval(
+            x + 2, y + 3, x + SPACE_SIZE - 2, y + SPACE_SIZE - 2,
+            fill=FOOD_GRADIENT[0], outline=FOOD_GRADIENT[2], width=2, tag="food"
+        )
+        # Apple highlight (3D effect)
+        highlight = self.canvas.create_arc(
+            x + 4, y + 5, x + 12, y + 13,
+            start=45, extent=90, outline=FOOD_HIGHLIGHT, width=2, tag="food"
+        )
+        # Apple stem
+        stem = self.canvas.create_rectangle(
+            x + SPACE_SIZE//2 - 1, y + 1, x + SPACE_SIZE//2 + 1, y + 4,
+            fill="#8B4513", tag="food"
+        )
+        # Apple leaf
+        leaf = self.canvas.create_oval(
+            x + SPACE_SIZE//2 + 1, y + 2, x + SPACE_SIZE//2 + 4, y + 4,
+            fill="#228B22", tag="food"
+        )
+        
+        self.elements = [shadow, apple_body, highlight, stem, leaf]
+        self.square = apple_body  # Keep for compatibility
+    
+    def delete(self):
+        """Delete all visual elements of the food"""
+        for element in self.elements:
+            self.canvas.delete(element)
+        self.elements = []
         
 class BonusFood:
     def __init__(self, canvas, snake, regular_food):
         self.canvas = canvas
+        self.elements = []
+        self.animation_phase = 0
         self.place_new(snake, regular_food)
 
     def place_new(self, snake, regular_food):
+        # Clear existing elements
+        for element in self.elements:
+            self.canvas.delete(element)
+        self.elements = []
+        
         while True:
             x = random.randint(0, (GAME_WIDTH // SPACE_SIZE) - 1) * SPACE_SIZE
             y = random.randint(0, (GAME_HEIGHT // SPACE_SIZE) - 1) * SPACE_SIZE
@@ -88,16 +138,58 @@ class BonusFood:
                 break
         self.x = x
         self.y = y
-        # Enhanced bonus food with star-like appearance
-        self.square = self.canvas.create_oval(
+        
+        # Realistic golden fruit with glow effect
+        # Outer glow
+        glow = self.canvas.create_oval(
+            x - 2, y - 2, x + SPACE_SIZE + 2, y + SPACE_SIZE + 2,
+            fill="", outline=BONUS_HIGHLIGHT, width=3, tag="bonus_food"
+        )
+        # Main golden fruit
+        fruit_shadow = self.canvas.create_oval(
+            x + 3, y + 3, x + SPACE_SIZE, y + SPACE_SIZE,
+            fill=BONUS_FOOD_GRADIENT[2], tag="bonus_food"
+        )
+        fruit_main = self.canvas.create_oval(
             x + 1, y + 1, x + SPACE_SIZE - 1, y + SPACE_SIZE - 1,
-            fill=BONUS_FOOD_COLOR, outline="#FFA500", width=3, tag="bonus_food"
+            fill=BONUS_FOOD_GRADIENT[0], outline=BONUS_FOOD_GRADIENT[2], width=2, tag="bonus_food"
         )
-        # Add sparkle effect
-        sparkle = self.canvas.create_text(
-            x + SPACE_SIZE//2, y + SPACE_SIZE//2,
-            text="★", fill="#FFFFFF", font=("Arial", 8), tag="bonus_food"
+        # Golden highlight
+        gold_highlight = self.canvas.create_arc(
+            x + 3, y + 3, x + 12, y + 12,
+            start=45, extent=90, outline="#FFFFAA", width=3, tag="bonus_food"
         )
+        # Animated sparkles
+        sparkle1 = self.canvas.create_text(
+            x + 5, y + 5, text="✦", fill="#FFFFFF", font=("Arial", 6), tag="bonus_food"
+        )
+        sparkle2 = self.canvas.create_text(
+            x + 15, y + 8, text="✧", fill="#FFFFCC", font=("Arial", 5), tag="bonus_food"
+        )
+        sparkle3 = self.canvas.create_text(
+            x + 8, y + 15, text="✦", fill="#FFFF88", font=("Arial", 4), tag="bonus_food"
+        )
+        
+        self.elements = [glow, fruit_shadow, fruit_main, gold_highlight, sparkle1, sparkle2, sparkle3]
+        self.square = fruit_main  # Keep for compatibility
+    
+    def delete(self):
+        """Delete all visual elements of the bonus food"""
+        for element in self.elements:
+            self.canvas.delete(element)
+        self.elements = []
+    
+    def animate(self, canvas):
+        """Animate the bonus food sparkles"""
+        self.animation_phase = (self.animation_phase + 1) % 60
+        if len(self.elements) >= 7:  # Ensure sparkles exist
+            # Animate sparkles with pulsing effect
+            alpha = 0.5 + 0.5 * abs(self.animation_phase - 30) / 30
+            sparkle_colors = ["#FFFFFF", "#FFFFCC", "#FFFF88"]
+            for i, sparkle in enumerate(self.elements[-3:]):
+                if self.animation_phase % 20 == i * 7:
+                    color = sparkle_colors[i % 3]
+                    canvas.itemconfig(sparkle, fill=color)
         
 class SnakeGame:
     def __init__(self, root):
@@ -161,42 +253,91 @@ class SnakeGame:
             self.canvas.delete(square)
         self.snake.squares = []
         
+        snake_length = len(self.snake.coordinates)
         for i, (x, y) in enumerate(self.snake.coordinates):
-            # Determine color based on position in snake
-            if i == 0:  # Head
-                color = SNAKE_HEAD_COLOR
-                # Draw head as circle with eyes
-                square = self.canvas.create_oval(
-                    x + 2, y + 2, x + SPACE_SIZE - 2, y + SPACE_SIZE - 2, 
-                    fill=color, outline="#FFFFFF", width=2, tag="snake"
+            if i == 0:  # Head - realistic with 3D effect
+                # Main head with gradient effect
+                head_bg = self.canvas.create_oval(
+                    x + 1, y + 1, x + SPACE_SIZE - 1, y + SPACE_SIZE - 1,
+                    fill=SNAKE_HEAD_COLORS[2], outline=SNAKE_OUTLINE, width=2, tag="snake"
                 )
-                # Add eyes
-                eye_size = 3
-                eye1_x, eye1_y = x + 5, y + 5
-                eye2_x, eye2_y = x + 12, y + 5
-                eye1 = self.canvas.create_oval(
+                head_main = self.canvas.create_oval(
+                    x + 2, y + 2, x + SPACE_SIZE - 2, y + SPACE_SIZE - 2,
+                    fill=SNAKE_HEAD_COLORS[0], outline=SNAKE_HEAD_COLORS[1], width=1, tag="snake"
+                )
+                # 3D highlight
+                highlight = self.canvas.create_arc(
+                    x + 3, y + 3, x + SPACE_SIZE - 8, y + SPACE_SIZE - 8,
+                    start=45, extent=90, outline="#FFFFFF", width=2, tag="snake"
+                )
+                
+                # Realistic eyes with pupils
+                eye_size = 4
+                pupil_size = 2
+                eye1_x, eye1_y = x + 6, y + 6
+                eye2_x, eye2_y = x + 12, y + 6
+                
+                # Eye whites
+                eye1_white = self.canvas.create_oval(
                     eye1_x, eye1_y, eye1_x + eye_size, eye1_y + eye_size,
-                    fill="#000000", tag="snake"
+                    fill="#FFFFFF", outline="#CCCCCC", tag="snake"
                 )
-                eye2 = self.canvas.create_oval(
+                eye2_white = self.canvas.create_oval(
                     eye2_x, eye2_y, eye2_x + eye_size, eye2_y + eye_size,
+                    fill="#FFFFFF", outline="#CCCCCC", tag="snake"
+                )
+                # Pupils
+                eye1_pupil = self.canvas.create_oval(
+                    eye1_x + 1, eye1_y + 1, eye1_x + pupil_size + 1, eye1_y + pupil_size + 1,
                     fill="#000000", tag="snake"
                 )
-                self.snake.squares.extend([square, eye1, eye2])
-            elif i == len(self.snake.coordinates) - 1:  # Tail
-                color = SNAKE_TAIL_COLOR
-                square = self.canvas.create_oval(
-                    x + 3, y + 3, x + SPACE_SIZE - 3, y + SPACE_SIZE - 3, 
-                    fill=color, outline=SNAKE_BODY_COLOR, width=1, tag="snake"
+                eye2_pupil = self.canvas.create_oval(
+                    eye2_x + 1, eye2_y + 1, eye2_x + pupil_size + 1, eye2_y + pupil_size + 1,
+                    fill="#000000", tag="snake"
                 )
-                self.snake.squares.append(square)
-            else:  # Body
-                color = SNAKE_BODY_COLOR
-                square = self.canvas.create_rectangle(
-                    x + 1, y + 1, x + SPACE_SIZE - 1, y + SPACE_SIZE - 1, 
-                    fill=color, outline=SNAKE_HEAD_COLOR, width=1, tag="snake"
+                
+                self.snake.squares.extend([head_bg, head_main, highlight, eye1_white, eye2_white, eye1_pupil, eye2_pupil])
+                
+            elif i == snake_length - 1:  # Tail - tapered and realistic
+                # Tapered tail effect
+                tail_main = self.canvas.create_oval(
+                    x + 4, y + 4, x + SPACE_SIZE - 4, y + SPACE_SIZE - 4,
+                    fill=SNAKE_TAIL_COLOR, outline=SNAKE_OUTLINE, width=1, tag="snake"
                 )
-                self.snake.squares.append(square)
+                tail_tip = self.canvas.create_oval(
+                    x + 7, y + 7, x + SPACE_SIZE - 7, y + SPACE_SIZE - 7,
+                    fill=SNAKE_BODY_COLORS[2], tag="snake"
+                )
+                self.snake.squares.extend([tail_main, tail_tip])
+                
+            else:  # Body - 3D segments with texture
+                # Body segment gradient
+                segment_index = i % 3
+                body_color = SNAKE_BODY_COLORS[segment_index]
+                
+                # Main body segment
+                body_bg = self.canvas.create_rectangle(
+                    x, y, x + SPACE_SIZE, y + SPACE_SIZE,
+                    fill=SNAKE_BODY_COLORS[2], outline=SNAKE_OUTLINE, width=1, tag="snake"
+                )
+                body_main = self.canvas.create_rectangle(
+                    x + 1, y + 1, x + SPACE_SIZE - 1, y + SPACE_SIZE - 1,
+                    fill=body_color, tag="snake"
+                )
+                # 3D highlight strip
+                highlight_strip = self.canvas.create_rectangle(
+                    x + 2, y + 2, x + SPACE_SIZE - 2, y + 5,
+                    fill=SNAKE_BODY_COLORS[1], tag="snake"
+                )
+                # Scale pattern
+                if i % 2 == 0:
+                    scale = self.canvas.create_line(
+                        x + 4, y + SPACE_SIZE//2, x + SPACE_SIZE - 4, y + SPACE_SIZE//2,
+                        fill=SNAKE_OUTLINE, width=1, tag="snake"
+                    )
+                    self.snake.squares.append(scale)
+                    
+                self.snake.squares.extend([body_bg, body_main, highlight_strip])
 
     def next_move(self):
         if not self.running:
@@ -233,7 +374,7 @@ class SnakeGame:
             self.total_foods_eaten += 1
             self.stage_foods_eaten += 1
             self.show_points_popup(x, y, points_earned)
-            self.canvas.delete(self.food.square)
+            self.food.delete()  # Delete all food elements
             self.food = Food(self.canvas, self.snake)
             
             # Check for stage progression (based on foods eaten, not score)
@@ -260,7 +401,7 @@ class SnakeGame:
             self.total_foods_eaten += 1
             self.stage_foods_eaten += 1
             self.show_points_popup(x, y, bonus_points, is_bonus=True)
-            self.canvas.delete(self.bonus_food.square)
+            self.bonus_food.delete()  # Delete all bonus food elements
             self.bonus_food = None
             self.update_display()
         else:
@@ -271,6 +412,10 @@ class SnakeGame:
         
         # Animate background effects
         self.animate_background()
+        
+        # Animate bonus food if it exists
+        if self.bonus_food:
+            self.bonus_food.animate(self.canvas)
         
         # Adjust speed based on score
         current_speed = self.get_current_speed()
@@ -386,12 +531,27 @@ class SnakeGame:
         """Create stage-specific background effects"""
         effects = STAGE_EFFECTS.get(self.stage, {})
         
-        if self.stage == 1:  # Stars
-            for _ in range(effects.get("count", 50)):
+        if self.stage == 1:  # Starfield with depth
+            # Distant stars
+            for _ in range(30):
+                x = random.randint(5, GAME_WIDTH - 5)
+                y = random.randint(5, GAME_HEIGHT - 5)
+                star = self.canvas.create_oval(x, y, x + 1, y + 1, fill="#CCCCCC", tags="background")
+                self.bg_elements.append(star)
+            # Medium stars
+            for _ in range(15):
                 x = random.randint(10, GAME_WIDTH - 10)
                 y = random.randint(10, GAME_HEIGHT - 10)
-                star = self.canvas.create_text(x, y, text="✦", fill="#FFFFFF", font=("Arial", random.randint(6, 12)), tags="background")
+                star = self.canvas.create_text(x, y, text="✦", fill="#FFFFFF", font=("Arial", 8), tags="background")
                 self.bg_elements.append(star)
+            # Bright stars
+            for _ in range(8):
+                x = random.randint(15, GAME_WIDTH - 15)
+                y = random.randint(15, GAME_HEIGHT - 15)
+                # Star with glow
+                glow = self.canvas.create_text(x, y, text="✧", fill="#AAAAFF", font=("Arial", 12), tags="background")
+                star = self.canvas.create_text(x, y, text="✧", fill="#FFFFFF", font=("Arial", 8), tags="background")
+                self.bg_elements.extend([glow, star])
                 
         elif self.stage == 2:  # Ocean bubbles and waves
             # Bubbles
@@ -471,11 +631,24 @@ class SnakeGame:
                                 self.canvas.coords(element, coords[0], GAME_HEIGHT, coords[2], GAME_HEIGHT + (coords[3] - coords[1]))
     
     def get_current_speed(self):
-        """Calculate current game speed based on score"""
-        if self.score > 15:
-            # Speed up the game - lower delay means faster movement
-            return max(50, SPEED - (self.score - 15) * 5)  # Minimum 50ms delay
-        return SPEED
+        """Calculate current game speed based on foods eaten for realistic progression"""
+        # Use foods eaten instead of score for more predictable speed progression
+        foods_eaten = self.total_foods_eaten
+        
+        if foods_eaten <= 10:
+            return SPEED  # Normal speed for first 10 foods
+        elif foods_eaten <= 20:
+            # Gradual speed increase: 100ms -> 90ms over 10 foods
+            return max(90, SPEED - (foods_eaten - 10) * 1)
+        elif foods_eaten <= 40:
+            # Moderate speed increase: 90ms -> 80ms over 20 foods  
+            return max(80, 90 - (foods_eaten - 20) * 0.5)
+        elif foods_eaten <= 60:
+            # Slower progression: 80ms -> 75ms over 20 foods
+            return max(75, 80 - (foods_eaten - 40) * 0.25)
+        else:
+            # Cap at reasonable maximum speed
+            return 75  # Never faster than 75ms (still playable)
 
     def game_over(self):
         self.running = False
