@@ -41,3 +41,28 @@
 - Synchronization: Finds statement boundaries for recovery
 - Precise error location: Line and column numbers
 - Descriptive messages: Clear error descriptions
+
+# Scenario 4
+
+- Scoped symbol tables with enter/exit scope functionality
+- Multi-level scoping (global, function, block levels)
+- Symbol lookup from current scope to global
+- Duplicate declaration detection within same scope
+Built-in C types: int, float, char, void, double
+- Type compatibility checking for operations
+- Type promotion (int → float when needed)
+- Assignment type validation
+ Variable declarations with initializer type validation
+- Function calls with argument count and type checking
+- Binary expressions with compatible type validation
+- Assignment expressions with type compatibility
+- Return statements matching function signature
+- Function signature checking (parameters and return type)
+- Built-in functions (like printf) pre-declared
+- Return type validation ensuring functions return correct types
+- Parameter scoping within function bodies
+- Undefined variables and functions
+- Type mismatches in assignments and operations
+- Duplicate declarations in same scope
+- Wrong argument counts in function calls
+- Detailed error messages with context
