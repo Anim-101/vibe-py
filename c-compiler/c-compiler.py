@@ -2079,17 +2079,23 @@ class DeadCodeEliminationPass(OptimizationPass):
         
         return IfStatement(condition, then_stmt, else_stmt)
 
-class LoopOptimizationPass(OptimizationPass):
+class LoopUnrollingPass(OptimizationPass):
     """
-    Loop Optimization Pass
+    Advanced Loop Unrolling Optimization Pass
     
-    Optimizes loop constructs:
-    - Eliminate loops with constant false conditions
-    - Optimize simple counting loops
+    Performs sophisticated loop transformations:
+    1. Detects simple counting loops suitable for unrolling
+    2. Analyzes loop bounds and iteration patterns  
+    3. Applies partial or full unrolling based on heuristics
+    4. Handles remainder loops for non-divisible iterations
+    5. Considers code size vs. performance trade-offs
     """
     
-    def __init__(self):
-        super().__init__("Loop Optimization")
+    def __init__(self, max_unroll_factor: int = 8, max_code_expansion: int = 4):
+        super().__init__("Loop Unrolling")
+        self.max_unroll_factor = max_unroll_factor    # Maximum times to unroll
+        self.max_code_expansion = max_code_expansion  # Maximum code size multiplier
+        self.unrolled_loops = 0                       # Statistics counter
     
     def optimize(self, node: ASTNode) -> ASTNode:
         """Apply loop optimizations to AST."""
@@ -2130,16 +2136,416 @@ class LoopOptimizationPass(OptimizationPass):
         node.body = self.optimize_loops(node.body)
         return node
     
-    def optimize_for_loop(self, node: ForStatement) -> ASTNode:
-        """Optimize for loops."""
-        # Check for constant false condition
-        if isinstance(node.condition, IntegerLiteral) and node.condition.value == 0:
-            self.optimizations_applied += 1
-            return CompoundStatement([])  # Remove the loop entirely
+    def analyze_loop_pattern(self, node) -> Optional[Dict]:
+        """
+        Analyze loop to determine if it's suitable for unrolling.
         
-        # Recursively optimize loop body
-        node.body = self.optimize_loops(node.body)
+        Returns loop analysis dict with:
+        - loop_var: induction variable name
+        - start_value: initial value  
+        - end_value: termination value
+        - increment: step size
+        - total_iterations: number of iterations (if computable)
+        - body_complexity: estimated body size
+        """
+        if isinstance(node, ForStatement):
+            return self._analyze_for_loop(node)
+        elif isinstance(node, WhileStatement):
+            return self._analyze_while_loop(node)
+        return None
+    
+    def _analyze_for_loop(self, node: ForStatement) -> Optional[Dict]:
+        """Analyze for loop pattern: for(init; condition; update)"""
+        analysis = {}
+        
+        # Analyze initialization: int i = start_value
+        if (isinstance(node.init, VariableDeclaration) and 
+            isinstance(node.init.initializer, IntegerLiteral)):
+            analysis['loop_var'] = node.init.name
+            analysis['start_value'] = node.init.initializer.value
+        elif isinstance(node.init, AssignmentExpression):
+            if (isinstance(node.init.left, Identifier) and 
+                isinstance(node.init.right, IntegerLiteral)):
+                analysis['loop_var'] = node.init.left.name
+                analysis['start_value'] = node.init.right.value
+        else:
+            return None  # Complex initialization
+        
+        # Analyze condition: i < end_value or i <= end_value
+        if isinstance(node.condition, BinaryExpression):
+            if (isinstance(node.condition.left, Identifier) and
+                node.condition.left.name == analysis['loop_var'] and
+                isinstance(node.condition.right, IntegerLiteral)):
+                
+                analysis['end_value'] = node.condition.right.value
+                analysis['condition_op'] = node.condition.operator
+                
+                if node.condition.operator == '<':
+                    analysis['inclusive'] = False
+                elif node.condition.operator == '<=':
+                    analysis['inclusive'] = True
+                else:
+                    return None  # Complex condition
+            else:
+                return None
+        else:
+            return None
+        
+        # Analyze update: i++ or i += increment
+        if isinstance(node.update, UnaryExpression):
+            if (isinstance(node.update.operand, Identifier) and
+                node.update.operand.name == analysis['loop_var'] and
+                node.update.operator == '++'):
+                analysis['increment'] = 1
+            else:
+                return None
+        elif isinstance(node.update, AssignmentExpression):
+            if (isinstance(node.update.left, Identifier) and
+                node.update.left.name == analysis['loop_var']):
+                # Handle i += increment or i = i + increment
+                if (isinstance(node.update.right, BinaryExpression) and
+                    node.update.right.operator == '+' and
+                    isinstance(node.update.right.left, Identifier) and
+                    node.update.right.left.name == analysis['loop_var'] and
+                    isinstance(node.update.right.right, IntegerLiteral)):
+                    analysis['increment'] = node.update.right.right.value
+                else:
+                    return None
+        else:
+            return None
+        
+        # Calculate total iterations
+        start = analysis['start_value']
+        end = analysis['end_value'] 
+        increment = analysis['increment']
+        
+        if increment > 0:
+            if analysis['inclusive']:
+                analysis['total_iterations'] = (end - start + increment) // increment
+            else:
+                analysis['total_iterations'] = (end - start + increment - 1) // increment
+        else:
+            return None  # Decreasing loops not yet supported
+        
+        # Estimate body complexity
+        analysis['body_complexity'] = self._estimate_code_size(node.body)
+        
+        return analysis
+    
+    def _analyze_while_loop(self, node: WhileStatement) -> Optional[Dict]:
+        """Analyze while loop for simple counting patterns."""
+        # For now, only handle simple while loops with obvious patterns
+        # This could be extended to detect more complex patterns
+        return None
+    
+    def _estimate_code_size(self, node: ASTNode) -> int:
+        """Estimate the code size/complexity of an AST node."""
+        if isinstance(node, CompoundStatement):
+            return sum(self._estimate_code_size(stmt) for stmt in node.statements)
+        elif isinstance(node, (BinaryExpression, UnaryExpression, AssignmentExpression)):
+            return 2  # Medium complexity
+        elif isinstance(node, CallExpression):
+            return 3  # Function calls are expensive
+        elif isinstance(node, IfStatement):
+            size = 2 + self._estimate_code_size(node.then_statement)
+            if node.else_statement:
+                size += self._estimate_code_size(node.else_statement)
+            return size
+        elif isinstance(node, (VariableDeclaration, ExpressionStatement)):
+            return 1  # Simple statement
+        else:
+            return 1  # Default complexity
+    
+    def should_unroll_loop(self, analysis: Dict) -> Dict:
+        """
+        Determine if loop should be unrolled and compute unroll factor.
+        
+        Returns unrolling decision with:
+        - should_unroll: boolean
+        - unroll_factor: how many times to unroll
+        - strategy: 'partial' or 'full'
+        """
+        iterations = analysis['total_iterations']
+        body_size = analysis['body_complexity']
+        
+        # Don't unroll if too many iterations
+        if iterations > 100:
+            return {'should_unroll': False, 'reason': 'too_many_iterations'}
+        
+        # Don't unroll if body is too complex
+        if body_size > 10:
+            return {'should_unroll': False, 'reason': 'body_too_complex'}
+        
+        # Full unrolling for small loops
+        if iterations <= 4 and body_size <= 3:
+            return {
+                'should_unroll': True,
+                'unroll_factor': iterations,
+                'strategy': 'full',
+                'reason': f'small_loop_{iterations}_iterations'
+            }
+        
+        # Partial unrolling for medium loops
+        if iterations <= 32 and body_size <= 5:
+            # Choose unroll factor based on iterations and body size
+            if iterations % 4 == 0:
+                unroll_factor = min(4, self.max_unroll_factor)
+            elif iterations % 2 == 0:
+                unroll_factor = min(2, self.max_unroll_factor)
+            else:
+                unroll_factor = 2  # Partial unroll with remainder
+            
+            # Check code expansion limit
+            expansion = unroll_factor * body_size
+            if expansion <= self.max_code_expansion * body_size:
+                return {
+                    'should_unroll': True,
+                    'unroll_factor': unroll_factor,
+                    'strategy': 'partial',
+                    'reason': f'medium_loop_{iterations}_iterations'
+                }
+        
+        return {'should_unroll': False, 'reason': 'not_profitable'}
+    
+    def unroll_loop(self, node: ASTNode, analysis: Dict, decision: Dict) -> ASTNode:
+        """
+        Perform the actual loop unrolling transformation.
+        
+        Supports both full and partial unrolling with remainder handling.
+        """
+        unroll_factor = decision['unroll_factor']
+        strategy = decision['strategy']
+        
+        print(f"      🔄 Unrolling loop {analysis['loop_var']} by {unroll_factor}x ({strategy})")
+        
+        if strategy == 'full':
+            return self._full_unroll(node, analysis)
+        else:
+            return self._partial_unroll(node, analysis, unroll_factor)
+    
+    def _full_unroll(self, node: ASTNode, analysis: Dict) -> ASTNode:
+        """Completely unroll a loop by replicating the body."""
+        loop_var = analysis['loop_var']
+        start_value = analysis['start_value']
+        iterations = analysis['total_iterations']
+        
+        # Create unrolled statements
+        unrolled_statements = []
+        
+        for i in range(iterations):
+            current_value = start_value + i * analysis['increment']
+            # Clone the loop body and substitute loop variable with current value
+            cloned_body = self._substitute_loop_variable(
+                self._deep_copy_node(node.body), 
+                loop_var, 
+                current_value
+            )
+            
+            if isinstance(cloned_body, CompoundStatement):
+                unrolled_statements.extend(cloned_body.statements)
+            else:
+                unrolled_statements.append(cloned_body)
+        
+        self.optimizations_applied += 1
+        self.unrolled_loops += 1
+        return CompoundStatement(unrolled_statements)
+    
+    def _partial_unroll(self, node: ASTNode, analysis: Dict, unroll_factor: int) -> ASTNode:
+        """Partially unroll a loop with remainder handling."""
+        loop_var = analysis['loop_var']
+        start_value = analysis['start_value']
+        end_value = analysis['end_value']
+        increment = analysis['increment']
+        total_iterations = analysis['total_iterations']
+        
+        # Calculate main loop and remainder
+        main_iterations = (total_iterations // unroll_factor) * unroll_factor
+        remainder_iterations = total_iterations % unroll_factor
+        
+        statements = []
+        
+        # Main unrolled loop
+        if main_iterations > 0:
+            # Update loop bounds for unrolled version
+            new_end_value = start_value + main_iterations * increment
+            new_increment = increment * unroll_factor
+            
+            # Create unrolled body
+            unrolled_body_stmts = []
+            for i in range(unroll_factor):
+                offset = i * increment
+                cloned_body = self._substitute_loop_variable_offset(
+                    self._deep_copy_node(node.body),
+                    loop_var,
+                    offset
+                )
+                if isinstance(cloned_body, CompoundStatement):
+                    unrolled_body_stmts.extend(cloned_body.statements)
+                else:
+                    unrolled_body_stmts.append(cloned_body)
+            
+            # Create new loop with unrolled body
+            if isinstance(node, ForStatement):
+                # Update for loop parameters
+                new_update = AssignmentExpression(
+                    Identifier(loop_var),
+                    '=',
+                    BinaryExpression(
+                        Identifier(loop_var),
+                        '+',
+                        IntegerLiteral(new_increment)
+                    )
+                )
+                
+                new_condition = BinaryExpression(
+                    Identifier(loop_var),
+                    analysis['condition_op'],
+                    IntegerLiteral(new_end_value)
+                )
+                
+                unrolled_loop = ForStatement(
+                    node.init,  # Keep original init
+                    new_condition,
+                    new_update,
+                    CompoundStatement(unrolled_body_stmts)
+                )
+                statements.append(unrolled_loop)
+        
+        # Remainder loop (if needed)
+        if remainder_iterations > 0:
+            remainder_start = start_value + main_iterations * increment
+            remainder_end = end_value
+            
+            # Create remainder loop initialization
+            remainder_init = AssignmentExpression(
+                Identifier(loop_var),
+                '=',
+                IntegerLiteral(remainder_start)
+            )
+            
+            remainder_condition = BinaryExpression(
+                Identifier(loop_var),
+                analysis['condition_op'],
+                IntegerLiteral(remainder_end)
+            )
+            
+            remainder_loop = ForStatement(
+                remainder_init,
+                remainder_condition,
+                node.update,  # Keep original increment
+                self._deep_copy_node(node.body)
+            )
+            statements.append(remainder_loop)
+        
+        self.optimizations_applied += 1
+        self.unrolled_loops += 1
+        return CompoundStatement(statements)
+    
+    def _substitute_loop_variable(self, node: ASTNode, var_name: str, value: int) -> ASTNode:
+        """Replace all occurrences of loop variable with constant value."""
+        if isinstance(node, Identifier) and node.name == var_name:
+            return IntegerLiteral(value)
+        elif isinstance(node, BinaryExpression):
+            node.left = self._substitute_loop_variable(node.left, var_name, value)
+            node.right = self._substitute_loop_variable(node.right, var_name, value)
+        elif isinstance(node, UnaryExpression):
+            node.operand = self._substitute_loop_variable(node.operand, var_name, value)
+        elif isinstance(node, AssignmentExpression):
+            node.left = self._substitute_loop_variable(node.left, var_name, value)
+            node.right = self._substitute_loop_variable(node.right, var_name, value)
+        elif isinstance(node, CompoundStatement):
+            node.statements = [
+                self._substitute_loop_variable(stmt, var_name, value) 
+                for stmt in node.statements
+            ]
+        elif isinstance(node, ExpressionStatement):
+            if node.expression:
+                node.expression = self._substitute_loop_variable(node.expression, var_name, value)
+        # Add more node types as needed
+        
         return node
+    
+    def _substitute_loop_variable_offset(self, node: ASTNode, var_name: str, offset: int) -> ASTNode:
+        """Replace loop variable with (loop_variable + offset) for partial unrolling."""
+        if isinstance(node, Identifier) and node.name == var_name:
+            if offset == 0:
+                return node  # No change needed
+            else:
+                return BinaryExpression(
+                    Identifier(var_name),
+                    '+',
+                    IntegerLiteral(offset)
+                )
+        elif isinstance(node, BinaryExpression):
+            node.left = self._substitute_loop_variable_offset(node.left, var_name, offset)
+            node.right = self._substitute_loop_variable_offset(node.right, var_name, offset)
+        elif isinstance(node, UnaryExpression):
+            node.operand = self._substitute_loop_variable_offset(node.operand, var_name, offset)
+        elif isinstance(node, AssignmentExpression):
+            node.left = self._substitute_loop_variable_offset(node.left, var_name, offset)
+            node.right = self._substitute_loop_variable_offset(node.right, var_name, offset)
+        elif isinstance(node, CompoundStatement):
+            node.statements = [
+                self._substitute_loop_variable_offset(stmt, var_name, offset) 
+                for stmt in node.statements
+            ]
+        elif isinstance(node, ExpressionStatement):
+            if node.expression:
+                node.expression = self._substitute_loop_variable_offset(node.expression, var_name, offset)
+        
+        return node
+    
+    def _deep_copy_node(self, node: ASTNode) -> ASTNode:
+        """Create a deep copy of an AST node."""
+        # Simple deep copy implementation - in practice, you'd want a more robust version
+        import copy
+        return copy.deepcopy(node)
+    
+    def optimize_loops(self, node: ASTNode) -> ASTNode:
+        """Main loop optimization entry point."""
+        if isinstance(node, (ForStatement, WhileStatement)):
+            # Analyze the loop
+            analysis = self.analyze_loop_pattern(node)
+            
+            if analysis:
+                # Decide whether to unroll
+                decision = self.should_unroll_loop(analysis)
+                
+                if decision['should_unroll']:
+                    print(f"      📊 Loop analysis: {analysis['total_iterations']} iterations, "
+                          f"body complexity: {analysis['body_complexity']}")
+                    print(f"      ✅ Decision: {decision['reason']}")
+                    
+                    # Perform unrolling
+                    return self.unroll_loop(node, analysis, decision)
+                else:
+                    print(f"      ❌ Skipping unroll: {decision['reason']}")
+            
+            # Recursively optimize loop body even if not unrolling
+            if isinstance(node, ForStatement):
+                node.body = self.optimize_loops(node.body)
+            elif isinstance(node, WhileStatement):
+                node.body = self.optimize_loops(node.body)
+            
+            return node
+            
+        elif isinstance(node, CompoundStatement):
+            node.statements = [self.optimize_loops(stmt) for stmt in node.statements]
+        elif isinstance(node, IfStatement):
+            node.then_statement = self.optimize_loops(node.then_statement)
+            if node.else_statement:
+                node.else_statement = self.optimize_loops(node.else_statement)
+        elif isinstance(node, FunctionDeclaration):
+            if node.body:
+                node.body = self.optimize_loops(node.body)
+        
+        return node
+    
+    def report(self):
+        """Enhanced reporting with unrolling statistics."""
+        super().report()
+        if self.unrolled_loops > 0:
+            print(f"      🔄 Successfully unrolled {self.unrolled_loops} loops")
 
 class PeepholeOptimizerPass(OptimizationPass):
     """
@@ -2250,8 +2656,8 @@ class OptimizationManager:
     def __init__(self):
         self.passes = [
             ConstantFoldingPass(),
-            DeadCodeEliminationPass(),
-            LoopOptimizationPass(),
+            DeadCodeEliminationPass(), 
+            LoopUnrollingPass(),
             PeepholeOptimizerPass()
         ]
         self.total_optimizations = 0

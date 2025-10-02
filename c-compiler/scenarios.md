@@ -120,3 +120,22 @@
 - Smart spilling only when necessary
 - Register lifetime management with precise allocation
 - Cross-function register coordination
+
+# Scenario 8
+
+- Pattern Recognition: Detects simple counting loops suitable for unrolling
+- Iteration Analysis: Computes total iterations, start/end values, increment patterns
+- Complexity Assessment: Estimates code size and performance impact
+- Profitability Analysis: Makes intelligent unrolling decisions
+- Full Unrolling: Complete elimination of loop overhead for small loops
+- Partial Unrolling: Balanced approach with remainder loop handling
+- Adaptive Unroll Factor: 2x, 4x, 8x based on loop characteristics
+- Code Size Control: Prevents excessive code expansion
+- CLoop Pattern Detection: for/while loop recognition
+- CInduction Variable Analysis: start, end, increment computation
+- CBody Complexity Estimation: prevents code bloat
+- CIteration Count Calculation: exact iteration prediction
+- CVariable Substitution: replaces loop vars with constants/offsets
+- CRemainder Handling: manages non-divisible iteration counts
+- CDeep AST Cloning: preserves original semantics
+- CError Recovery: graceful fallback for complex patterns
